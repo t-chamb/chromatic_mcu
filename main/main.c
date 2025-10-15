@@ -34,6 +34,9 @@
 #include "settings.h"
 #include "silent.h"
 #include "pwrmgr.h"
+#include "cmd_sd_spi.h"
+#include "cmd_sd_test.h"
+#include "sd_spi.h"
 
 enum {
     kLVGL_TickPeriod_us = 1000u, // 1 millisecond
@@ -163,6 +166,8 @@ static void persist_storage_init(void)
     Firmware_Initialize();
     SerialNum_Initialize();
     Button_RegisterCommands();
+    register_sd_spi_commands();
+    register_sd_test_commands();
 
     const fnSettingApply_t fnApplySetting[kNumSettingKeys] = {
         [kSettingKey_FrameBlend]       = FrameBlend_ApplySetting,
@@ -346,6 +351,22 @@ void app_main(void)
     esp_console_register_help_command();
     // All commands must be registered prior to starting the REPL
     ESP_ERROR_CHECK(esp_console_start_repl(pRepl));
+
+    // Auto-initialize SD card during boot
+    ESP_LOGI(TAG, "Auto-initializing SD card...");
+    esp_err_t sd_ret = sd_spi_init();
+    if (sd_ret == ESP_OK) {
+        sd_ret = sd_spi_mount("/sdcard");
+        if (sd_ret == ESP_OK) {
+            ESP_LOGI(TAG, "SD card auto-mounted successfully at /sdcard");
+        } else {
+            ESP_LOGW(TAG, "SD card initialization succeeded but mount failed: %s", esp_err_to_name(sd_ret));
+            ESP_LOGW(TAG, "SD card can be mounted manually with 'sd_spi_init' command");
+        }
+    } else {
+        ESP_LOGW(TAG, "SD card auto-initialization failed: %s", esp_err_to_name(sd_ret));
+        ESP_LOGW(TAG, "SD card can be initialized manually with 'sd_spi_init' command");
+    }
 
     vTaskDelay( pdMS_TO_TICKS(2000) );
     xTaskCreate(PwrMgr_Task, "pwr_mgr_task", kSleepTask_StackDepth, NULL, kSleepTask_Priority, NULL);
