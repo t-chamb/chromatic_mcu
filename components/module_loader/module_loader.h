@@ -34,10 +34,11 @@ typedef void (*module_exit_fn_t)(void);
 
 // Module size categories
 typedef enum {
-    MODULE_SIZE_SMALL  = 64 * 1024,   // 64KB
-    MODULE_SIZE_MEDIUM = 128 * 1024,  // 128KB
-    MODULE_SIZE_LARGE  = 256 * 1024,  // 256KB
-    MODULE_SIZE_XLARGE = 512 * 1024   // 512KB
+    MODULE_SLOT_64K   = 64 * 1024,     // 64KB
+    MODULE_SLOT_128K  = 128 * 1024,    // 128KB
+    MODULE_SLOT_256K  = 256 * 1024,    // 256KB
+    MODULE_SLOT_512K  = 512 * 1024,    // 512KB
+    MODULE_SLOT_1024K = 1024 * 1024    // 1MB
 } module_size_t;
 
 // Module info structure

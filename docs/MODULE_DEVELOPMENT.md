@@ -10,10 +10,11 @@ The Chromatic MCU supports dynamic loading of modules at runtime. Modules are co
 
 Modules are allocated into size-based slots:
 
-- **Small (64KB)**: Lightweight utilities, simple features
-- **Medium (128KB)**: WiFi server, Bluetooth, moderate apps
-- **Large (256KB)**: Complex applications
-- **XLarge (512KB)**: Heavy applications with lots of code/data
+- **64K**: Lightweight utilities, simple features
+- **128K**: Moderate features, basic drivers
+- **256K**: Complex features
+- **512K**: Heavy applications
+- **1024K (1MB)**: Very large apps like WiFi server with full stack
 
 The system automatically selects the appropriate slot size based on your module's requirements.
 
@@ -145,7 +146,7 @@ modlist
 
 Shows all loaded modules with:
 - Name and version
-- Size class (64KB, 128KB, etc.)
+- Size class (64K, 128K, 256K, 512K, 1024K)
 - Memory usage
 - Load address
 - Description
@@ -175,7 +176,7 @@ Displays:
 
 ### Memory Management
 
-1. **Keep modules small** - Aim for < 64KB when possible
+1. **Keep modules small** - Aim for 64K or 128K slots when possible
 2. **Free resources** - Always clean up in `module_exit()`
 3. **Check allocations** - Handle malloc failures gracefully
 4. **Avoid leaks** - Every malloc needs a free

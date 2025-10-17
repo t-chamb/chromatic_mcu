@@ -372,14 +372,16 @@ esp_err_t module_get_info(module_handle_t handle, module_info_t *info)
     info->load_address = mod->code_mem;
     
     // Determine size class
-    if (info->memory_used <= MODULE_SIZE_SMALL) {
-        info->size_class = MODULE_SIZE_SMALL;
-    } else if (info->memory_used <= MODULE_SIZE_MEDIUM) {
-        info->size_class = MODULE_SIZE_MEDIUM;
-    } else if (info->memory_used <= MODULE_SIZE_LARGE) {
-        info->size_class = MODULE_SIZE_LARGE;
+    if (info->memory_used <= MODULE_SLOT_64K) {
+        info->size_class = MODULE_SLOT_64K;
+    } else if (info->memory_used <= MODULE_SLOT_128K) {
+        info->size_class = MODULE_SLOT_128K;
+    } else if (info->memory_used <= MODULE_SLOT_256K) {
+        info->size_class = MODULE_SLOT_256K;
+    } else if (info->memory_used <= MODULE_SLOT_512K) {
+        info->size_class = MODULE_SLOT_512K;
     } else {
-        info->size_class = MODULE_SIZE_XLARGE;
+        info->size_class = MODULE_SLOT_1024K;
     }
     
     info->is_loaded = true;

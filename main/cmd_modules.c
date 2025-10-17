@@ -31,10 +31,11 @@ static int do_module_list(int argc, char **argv)
     for (size_t i = 0; i < num_modules; i++) {
         const char *size_str;
         switch (modules[i].size_class) {
-            case MODULE_SIZE_SMALL:  size_str = "64KB"; break;
-            case MODULE_SIZE_MEDIUM: size_str = "128KB"; break;
-            case MODULE_SIZE_LARGE:  size_str = "256KB"; break;
-            case MODULE_SIZE_XLARGE: size_str = "512KB"; break;
+            case MODULE_SLOT_64K:   size_str = "64K"; break;
+            case MODULE_SLOT_128K:  size_str = "128K"; break;
+            case MODULE_SLOT_256K:  size_str = "256K"; break;
+            case MODULE_SLOT_512K:  size_str = "512K"; break;
+            case MODULE_SLOT_1024K: size_str = "1024K"; break;
             default: size_str = "???"; break;
         }
         
