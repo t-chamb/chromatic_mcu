@@ -29,6 +29,8 @@
 #include "style.h"
 #include "player_num.h"
 #include "cmd_filesystem.h"
+#include "cmd_modules.h"
+#include "module_loader.h"
 #include "wifi_file_server_osd.h"
 #include "screen_transit_ctl.h"
 #include "mutex.h"
@@ -170,10 +172,14 @@ static void persist_storage_init(void)
     Firmware_Initialize();
     SerialNum_Initialize();
     WiFiFileServer_Initialize();
+    // Initialize module loader
+    ESP_ERROR_CHECK(module_loader_init());
+    
     Button_RegisterCommands();
     register_sd_spi_commands();
     register_sd_test_commands();
     register_filesystem_commands();
+    register_module_commands();
 
     const fnSettingApply_t fnApplySetting[kNumSettingKeys] = {
         [kSettingKey_FrameBlend]       = FrameBlend_ApplySetting,
