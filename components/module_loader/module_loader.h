@@ -32,12 +32,22 @@ typedef void* module_handle_t;
 typedef esp_err_t (*module_init_fn_t)(void);
 typedef void (*module_exit_fn_t)(void);
 
+// Module size categories
+typedef enum {
+    MODULE_SIZE_SMALL  = 64 * 1024,   // 64KB
+    MODULE_SIZE_MEDIUM = 128 * 1024,  // 128KB
+    MODULE_SIZE_LARGE  = 256 * 1024,  // 256KB
+    MODULE_SIZE_XLARGE = 512 * 1024   // 512KB
+} module_size_t;
+
 // Module info structure
 typedef struct {
     char name[32];
     char description[64];
     uint32_t version;
     size_t memory_used;
+    void *load_address;      // Where module is loaded in RAM
+    module_size_t size_class; // Size category
     bool is_loaded;
 } module_info_t;
 

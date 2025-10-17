@@ -24,14 +24,26 @@ static int do_module_list(int argc, char **argv)
     }
 
     printf("\nLoaded Modules:\n");
-    printf("%-20s %-10s %-12s %s\n", "Name", "Version", "Memory", "Description");
-    printf("─────────────────────────────────────────────────────────────────\n");
+    printf("%-20s %-8s %-10s %-12s %-12s %s\n", 
+           "Name", "Version", "Size Class", "Memory", "Address", "Description");
+    printf("────────────────────────────────────────────────────────────────────────────\n");
 
     for (size_t i = 0; i < num_modules; i++) {
-        printf("%-20s %-10lu %-12zu %s\n",
+        const char *size_str;
+        switch (modules[i].size_class) {
+            case MODULE_SIZE_SMALL:  size_str = "64KB"; break;
+            case MODULE_SIZE_MEDIUM: size_str = "128KB"; break;
+            case MODULE_SIZE_LARGE:  size_str = "256KB"; break;
+            case MODULE_SIZE_XLARGE: size_str = "512KB"; break;
+            default: size_str = "???"; break;
+        }
+        
+        printf("%-20s %-8lu %-10s %-12zu 0x%08lx   %s\n",
                modules[i].name,
                modules[i].version,
+               size_str,
                modules[i].memory_used,
+               (unsigned long)modules[i].load_address,
                modules[i].description);
     }
 

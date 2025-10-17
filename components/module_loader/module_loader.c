@@ -369,6 +369,19 @@ esp_err_t module_get_info(module_handle_t handle, module_info_t *info)
     strncpy(info->description, mod->header.description, sizeof(info->description) - 1);
     info->version = mod->header.version;
     info->memory_used = mod->header.code_size + mod->header.data_size + mod->header.bss_size;
+    info->load_address = mod->code_mem;
+    
+    // Determine size class
+    if (info->memory_used <= MODULE_SIZE_SMALL) {
+        info->size_class = MODULE_SIZE_SMALL;
+    } else if (info->memory_used <= MODULE_SIZE_MEDIUM) {
+        info->size_class = MODULE_SIZE_MEDIUM;
+    } else if (info->memory_used <= MODULE_SIZE_LARGE) {
+        info->size_class = MODULE_SIZE_LARGE;
+    } else {
+        info->size_class = MODULE_SIZE_XLARGE;
+    }
+    
     info->is_loaded = true;
 
     return ESP_OK;
