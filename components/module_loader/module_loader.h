@@ -60,15 +60,6 @@ typedef struct {
 esp_err_t module_loader_init(void);
 
 /**
- * @brief Load a module from flash partition
- * 
- * @param flash_addr Flash address where module is stored
- * @param handle Output handle to loaded module
- * @return ESP_OK on success
- */
-esp_err_t module_load_from_flash(uint32_t flash_addr, module_handle_t *handle);
-
-/**
  * @brief Load a module from memory (embedded modules)
  * 
  * @param data Pointer to module data in memory
