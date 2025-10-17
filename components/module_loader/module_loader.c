@@ -332,8 +332,22 @@ esp_err_t module_load_from_memory(const uint8_t *data, size_t size, module_handl
 
     module_t *mod = &g_loader.modules[slot];
 
-    // Copy header from memory
-    memcpy(&mod->header, data, sizeof(module_header_t));
+    ESP_LOGI(TAG, "Loading from memory: data=%p, size=%zu", data, size);
+    
+    // Check if data is in flash (ROM) - addresses 0x40000000-0x40400000
+    bool is_flash = ((uintptr_t)data >= 0x40000000 && (uintptr_t)data < 0x40400000) ||
+                    ((uintptr_t)data >= 0x3F400000 && (uintptr_t)data < 0x3F800000);
+    
+    if (is_flash) {
+        ESP_LOGI(TAG, "Data is in flash, using byte-by-byte copy");
+    }
+
+    // Copy header from memory - use byte copy for safety with flash
+    // Flash memory can have alignment issues with word access
+    uint8_t *dst = (uint8_t *)&mod->header;
+    for (size_t i = 0; i < sizeof(module_header_t); i++) {
+        dst[i] = data[i];
+    }
 
     // Validate header
     esp_err_t ret = validate_module_header(&mod->header);
@@ -342,13 +356,20 @@ esp_err_t module_load_from_memory(const uint8_t *data, size_t size, module_handl
     }
 
     // Allocate and copy code
-    mod->code_mem = heap_caps_malloc(mod->header.code_size, MALLOC_CAP_EXEC);
+    // Use MALLOC_CAP_8BIT for writable memory, not MALLOC_CAP_EXEC
+    // ESP32 instruction cache is read-only, we need IRAM for executable code
+    mod->code_mem = heap_caps_malloc(mod->header.code_size, MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
     if (mod->code_mem == NULL) {
         ESP_LOGE(TAG, "Failed to allocate code memory");
         return ESP_ERR_NO_MEM;
     }
 
-    memcpy(mod->code_mem, data + sizeof(module_header_t), mod->header.code_size);
+    ESP_LOGI(TAG, "Copying %lu bytes of code to %p", mod->header.code_size, mod->code_mem);
+    const uint8_t *code_src = data + sizeof(module_header_t);
+    uint8_t *code_dst = (uint8_t *)mod->code_mem;
+    for (size_t i = 0; i < mod->header.code_size; i++) {
+        code_dst[i] = code_src[i];
+    }
 
     // Allocate and copy data if needed
     if (mod->header.data_size > 0) {
@@ -359,8 +380,12 @@ esp_err_t module_load_from_memory(const uint8_t *data, size_t size, module_handl
             return ESP_ERR_NO_MEM;
         }
 
-        memcpy(mod->data_mem, data + sizeof(module_header_t) + mod->header.code_size, 
-               mod->header.data_size);
+        ESP_LOGI(TAG, "Copying %lu bytes of data", mod->header.data_size);
+        const uint8_t *data_src = data + sizeof(module_header_t) + mod->header.code_size;
+        uint8_t *data_dst = (uint8_t *)mod->data_mem;
+        for (size_t i = 0; i < mod->header.data_size; i++) {
+            data_dst[i] = data_src[i];
+        }
 
         // Zero BSS
         if (mod->header.bss_size > 0) {

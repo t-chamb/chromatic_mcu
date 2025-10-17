@@ -188,6 +188,9 @@ static int do_module_load_embedded(int argc, char **argv)
     
     size_t size = embedded_module_get_size(found_index);
     printf("Loading embedded module '%s' (%zu bytes)\n", name, size);
+    printf("  Data pointer: %p\n", found->data);
+    printf("  First 4 bytes: %02x %02x %02x %02x\n", 
+           found->data[0], found->data[1], found->data[2], found->data[3]);
     
     module_handle_t handle;
     esp_err_t ret = module_load_from_memory(found->data, size, &handle);
