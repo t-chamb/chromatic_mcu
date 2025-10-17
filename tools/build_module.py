@@ -49,7 +49,7 @@ def build_module(source_file, output_file, name, description, entry_func="module
     link_cmd = [
         'xtensa-esp32-elf-ld',
         '-r',                       # Relocatable output
-        '--gc-sections',            # Remove unused sections
+        '-e', entry_func,           # Entry point
         obj_file,
         '-o', bin_file
     ]
