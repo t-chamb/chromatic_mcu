@@ -21,6 +21,7 @@ static const char* NVS_KeyStr[kNumSettingKeys] = {
     [kSettingKey_DPadCtl]          = "dpad-diag",
     [kSettingKey_LowBattIconCtl]   = "lbi-ctl",
     [kSettingKey_PaletteStyleID]   = "plt-style-id",
+    [kSettingKey_WiFiFileServer]   = "wifi-file-srv",
 };
 
 const SettingValue_t DefaultSettings[kNumSettingKeys] = {
@@ -63,6 +64,10 @@ const SettingValue_t DefaultSettings[kNumSettingKeys] = {
     [kSettingKey_PaletteStyleID] = {
         .eType = kSettingDataType_U8,
         .U8 = 0,
+    },
+    [kSettingKey_WiFiFileServer] = {
+        .eType = kSettingDataType_U8,
+        .U8 = 0,  // Default: WiFi file server disabled
     }
 };
 

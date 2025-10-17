@@ -14,12 +14,12 @@
 #include "display/color_correct_lcd.h"
 #include "display/color_correct_usb.h"
 #include "display/frameblend.h"
-#include "display/frameblend.h"
 #include "display/low_batt_icon_ctl.h"
 #include "display/screen_transit_ctl.h"
 #include "system/silent.h"
 #include "system/player_num.h"
 #include "system/serial_num.h"
+#include "system/wifi_file_server_osd.h"
 #include "osd.h"
 #include "osd_shared.h"
 #include "esp_log.h"
@@ -40,37 +40,31 @@ static void CreateMenuSystem(lv_obj_t *const pScreen);
 
 void OSD_Default_Init(lv_obj_t *const pScreen)
 {
+    ESP_LOGI(TAG, "OSD_Default_Init starting");
+    
+    /* Skip battery widget - has image dependencies */
+
+    // Initialize menu system
     static OSD_Widget_t MenuMgr = {
         .Name = "MenuMgr",
     };
 
     OSD_Result_t eResult = MenuMgr_Initialize(&MenuMgr, pScreen);
-
     if (eResult != kOSD_Result_Ok)
     {
         ESP_LOGE(TAG, "Menu manager init failed: %d", eResult);
         return;
     }
-
-    static OSD_Widget_t Battery = {
-        .Name = "Battery",
-    };
-
-    if ((eResult = Battery_Init(&Battery)) != kOSD_Result_Ok)
-    {
-        ESP_LOGE(TAG, "Battery widget init failed %d", eResult);
-        return;
-    }
-
+    
+    OSD_AddWidget(&MenuMgr);
+    
+    // Create all menu tabs
     CreateMenuStatus(pScreen);
     CreateMenuDisplay(pScreen);
     CreateMenuControls(pScreen);
     CreateMenuPalette(pScreen);
     CreateMenuSystem(pScreen);
-
-    OSD_AddWidget(&Battery);
-    OSD_AddWidget(&MenuMgr);
-
+    
     ESP_LOGI(TAG, "Default OSD init OK");
 }
 
@@ -129,7 +123,6 @@ static void CreateMenuStatus(lv_obj_t *const pScreen)
         ESP_LOGE(TAG, "%s tab item init failed %d", SilentMode.Widget.Name, eResult);
         return;
     }
-
 }
 
 static void CreateMenuDisplay(lv_obj_t *const pScreen)
@@ -173,7 +166,7 @@ static void CreateMenuDisplay(lv_obj_t *const pScreen)
         return;
     }
 
-    #ifdef ENABLE_COLOR_CORRECTION
+#ifdef ENABLE_COLOR_CORRECTION
     static TabItem_t ColorCorrection_LCD = {
         .Widget = {
             .Name = "LCD COLOR CORR.",
@@ -188,7 +181,7 @@ static void CreateMenuDisplay(lv_obj_t *const pScreen)
         ESP_LOGE(TAG, "%s tab item init failed %d", ColorCorrection_LCD.Widget.Name, eResult);
         return;
     }
-    #endif
+#endif
 
     static TabItem_t ColorCorrection_USB = {
         .Widget = {
@@ -291,7 +284,6 @@ static void CreateMenuControls(lv_obj_t *const pScreen)
         ESP_LOGE(TAG, "%s widget init failed %d", Tab_Controls.Widget.Name, eResult);
         return;
     }
-
 }
 
 static void CreateMenuPalette(lv_obj_t *const pScreen)
@@ -408,6 +400,21 @@ static void CreateMenuSystem(lv_obj_t *const pScreen)
         return;
     }
 
+    static TabItem_t WiFiFileServer = {
+        .Widget = {
+            .Name = "FILE SERVER",
+            .fnDraw = WiFiFileServer_Draw,
+            .fnOnButton = WiFiFileServer_OnButton,
+            .fnOnTransition = WiFiFileServer_OnTransition,
+        },
+    };
+
+    if ((eResult = Tab_AddItem(pList, &WiFiFileServer, pScreen)) != kOSD_Result_Ok)
+    {
+        ESP_LOGE(TAG, "%s tab item init failed %d", WiFiFileServer.Widget.Name, eResult);
+        return;
+    }
+
     if (SerialNum_IsPresent())
     {
         static TabItem_t SerialNumber = {
@@ -431,3 +438,4 @@ static void CreateMenuSystem(lv_obj_t *const pScreen)
         return;
     }
 }
+

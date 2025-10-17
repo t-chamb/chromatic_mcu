@@ -1,3 +1,31 @@
 managed_components/
 build/
 sdkconfig
+dev_tools/
+
+# Development notes and checklists (not for PR)
+WIFI_FILE_SERVER_REFACTOR.md
+WIFI_FILE_SERVER_IMPROVEMENTS.md
+WIFI_FILE_SERVER_PR_CHECKLIST.md
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
+*.orig

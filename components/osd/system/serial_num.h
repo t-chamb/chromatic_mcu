@@ -8,3 +8,4 @@ OSD_Result_t SerialNum_Draw(void* arg);
 OSD_Result_t SerialNum_OnTransition(void* arg);
 OSD_Result_t SerialNum_Initialize(void);
 bool SerialNum_IsPresent(void);
+const char* SerialNum_GetString(void);

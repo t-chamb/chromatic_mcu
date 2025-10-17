@@ -19,6 +19,7 @@ idf_component_register(SRCS
     "img_option_dis.c"
     "img_toggle_off.c"
     "img_toggle_on.c"
+    "icon_wifi.c"
     "menu_controls.c"
     "menu_display.c"
     "menu_palette.c"

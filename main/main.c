@@ -28,6 +28,8 @@
 #include "low_batt_icon_ctl.h"
 #include "style.h"
 #include "player_num.h"
+#include "cmd_filesystem.h"
+#include "wifi_file_server_osd.h"
 #include "screen_transit_ctl.h"
 #include "mutex.h"
 #include "serial_num.h"
@@ -37,6 +39,8 @@
 #include "cmd_sd_spi.h"
 #include "cmd_sd_test.h"
 #include "sd_spi.h"
+#include "wifi_file_server.h"
+#include "hotkeys.h"
 
 enum {
     kLVGL_TickPeriod_us = 1000u, // 1 millisecond
@@ -165,9 +169,11 @@ static void persist_storage_init(void)
     Settings_Initialize();
     Firmware_Initialize();
     SerialNum_Initialize();
+    WiFiFileServer_Initialize();
     Button_RegisterCommands();
     register_sd_spi_commands();
     register_sd_test_commands();
+    register_filesystem_commands();
 
     const fnSettingApply_t fnApplySetting[kNumSettingKeys] = {
         [kSettingKey_FrameBlend]       = FrameBlend_ApplySetting,
@@ -180,6 +186,7 @@ static void persist_storage_init(void)
         [kSettingKey_DPadCtl]          = DPadCtl_ApplySetting,
         [kSettingKey_LowBattIconCtl]   = LowBattIconCtl_ApplySetting,
         [kSettingKey_PaletteStyleID]   = Style_ApplySetting,
+        [kSettingKey_WiFiFileServer]   = WiFiFileServer_ApplySetting,
     };
 
     OSD_Result_t eResult;
@@ -228,6 +235,8 @@ static void persist_storage_init(void)
 static esp_console_repl_t *pRepl = NULL;
 static esp_console_repl_config_t ReplConfig = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
 static esp_console_dev_uart_config_t ReplHWConfig = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
+
+
 
 void app_main(void)
 {
@@ -371,3 +380,4 @@ void app_main(void)
     vTaskDelay( pdMS_TO_TICKS(2000) );
     xTaskCreate(PwrMgr_Task, "pwr_mgr_task", kSleepTask_StackDepth, NULL, kSleepTask_Priority, NULL);
 }
+

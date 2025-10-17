@@ -26,6 +26,7 @@ typedef enum MutexKey
     kMutexKey_ScreenTransitCtl,
     kMutexKey_Brightness,
     kMutexKey_PlayerNum,
+    kMutexKey_WiFiFileServer,
     kNumMutexKeys,
 
     kMutexKey_FirstKey = kMutexKey_Buttons,

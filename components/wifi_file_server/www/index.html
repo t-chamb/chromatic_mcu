@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Chromatic File Manager</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <h1>Chromatic File Manager</h1>
+    <div id="info"></div>
+    <div id="path"></div>
+    
+    <div class="box">
+        <div id="deviceSerial" style="padding: 10px; background: #f0f0f0; border-radius: 3px; margin-bottom: 15px; font-size: 12px; line-height: 1.6;">
+            Loading device info...
+        </div>
+        
+        <div style="margin-bottom: 15px;">
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                <b>WiFi Settings</b>
+                <button onclick="toggleSettings()" id="settingsToggle">Configure</button>
+            </div>
+            
+            <div id="settingsPanel" style="display: none; padding: 15px; background: #f9f9f9; border-radius: 3px;">
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 5px; font-weight: bold;">SSID</label>
+                    <input type="text" id="ssidInput" placeholder="Chromatic_MCU" maxlength="32" style="width: 100%; max-width: 300px; padding: 8px; box-sizing: border-box; border: 1px solid #ddd; border-radius: 3px;">
+                </div>
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 5px; font-weight: bold;">Password</label>
+                    <input type="password" id="passwordInput" placeholder="chromatic123" maxlength="64" style="width: 100%; max-width: 300px; padding: 8px; box-sizing: border-box; border: 1px solid #ddd; border-radius: 3px;">
+                </div>
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                        <input type="checkbox" id="hideSSID">
+                        <span>Hide SSID (network won't be visible)</span>
+                    </label>
+                </div>
+                
+                <div style="margin-top: 20px;">
+                    <button onclick="saveSettings()" style="padding: 10px 20px; font-weight: bold;">Save Settings</button>
+                    <span id="settingsStatus" style="margin-left: 10px;"></span>
+                </div>
+                
+                <p style="font-size: 11px; color: #999; margin-top: 15px; margin-bottom: 0;">
+                    <strong>Note:</strong> Device will restart after saving. Reconnect using new credentials.
+                </p>
+            </div>
+        </div>
+    </div>
+    
+    <div class="box">
+        <b>Upload</b><br>
+        <label>
+            <input type="checkbox" id="folderMode" onchange="toggleFolderMode()">
+            Upload entire folder
+        </label>
+        <br>
+        <input type="file" id="fileInput" accept=".bin,.gb,.gbc,.txt,.json" multiple style="margin-top: 5px;">
+        <button onclick="uploadFiles()">Upload</button>
+        <div id="uploadStatus"></div>
+        <p style="font-size: 11px; color: #999; margin-top: 5px;">
+            Allowed: .bin, .gb, .gbc, .txt, .json
+        </p>
+    </div>
+    
+    <div class="box">
+        <b>Files</b>
+        <div id="fileList">Loading...</div>
+        <div id="pagination"></div>
+    </div>
+    
+    <script src="/app.js"></script>
+</body>
+</html>

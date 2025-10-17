@@ -154,3 +154,8 @@ static OSD_Result_t register_serial_num_dump(void)
     return kOSD_Result_Ok;
 }
 #endif
+
+const char* SerialNum_GetString(void)
+{
+    return _Ctx.SerialNumStr;
+}

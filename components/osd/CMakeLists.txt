@@ -10,12 +10,12 @@ idf_component_register(SRCS
                         "display/low_batt_icon_ctl.c"
                         "display/screen_transit_ctl.c"
                         "osd.c"
-                        "osd_default.c"
                         "status/brightness.c"
                         "status/fw.c"
                         "system/silent.c"
                         "system/serial_num.c"
                         "system/player_num.c"
+                        "system/wifi_file_server.c"
                     INCLUDE_DIRS
                         "."
                         "controls/"
@@ -23,5 +23,5 @@ idf_component_register(SRCS
                         "palette/"
                         "display/"
                         "system/"
-                    REQUIRES battery common dlist menu_mgr
-                    PRIV_REQUIRES esp_app_format settings console efuse)
+                    REQUIRES battery common dlist tab wifi_file_server
+                    PRIV_REQUIRES esp_app_format settings console efuse sd_spi images)
