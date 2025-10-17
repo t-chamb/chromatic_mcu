@@ -355,16 +355,28 @@ esp_err_t module_load_from_memory(const uint8_t *data, size_t size, module_handl
         return ret;
     }
 
-    // Allocate code in IRAM (executable memory)
-    // MALLOC_CAP_IRAM_8BIT gives us byte-accessible IRAM that can execute code
-    mod->code_mem = heap_caps_malloc(mod->header.code_size, MALLOC_CAP_IRAM_8BIT);
-    if (mod->code_mem == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate %lu bytes in IRAM", mod->header.code_size);
-        ESP_LOGI(TAG, "Free IRAM: %zu bytes", heap_caps_get_free_size(MALLOC_CAP_IRAM_8BIT));
-        return ESP_ERR_NO_MEM;
+    // For embedded modules in flash, use the code directly (flash is executable)
+    // For SD card modules, we'd need IRAM but that's limited
+    // Solution: For now, embedded modules execute from flash, SD modules are for data only
+    if (is_flash) {
+        ESP_LOGI(TAG, "Module code is in flash (executable), using direct pointer");
+        mod->code_mem = (void *)(data + sizeof(module_header_t));
+    } else {
+        // SD card modules: allocate in regular DRAM
+        // Note: Code won't be executable, but data/assets can still be loaded
+        ESP_LOGW(TAG, "Allocating code in DRAM (not executable)");
+        mod->code_mem = malloc(mod->header.code_size);
+        if (mod->code_mem == NULL) {
+            ESP_LOGE(TAG, "Failed to allocate %lu bytes for code", mod->header.code_size);
+            return ESP_ERR_NO_MEM;
+        }
+        
+        const uint8_t *code_src = data + sizeof(module_header_t);
+        uint8_t *code_dst = (uint8_t *)mod->code_mem;
+        for (size_t i = 0; i < mod->header.code_size; i++) {
+            code_dst[i] = code_src[i];
+        }
     }
-
-    ESP_LOGI(TAG, "Allocated %lu bytes of code in IRAM at %p", mod->header.code_size, mod->code_mem);
     const uint8_t *code_src = data + sizeof(module_header_t);
     uint8_t *code_dst = (uint8_t *)mod->code_mem;
     for (size_t i = 0; i < mod->header.code_size; i++) {

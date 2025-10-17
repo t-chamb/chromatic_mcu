@@ -3,6 +3,7 @@
 #include "esp_console.h"
 #include "argtable3/argtable3.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "module_loader.h"
 #include "embedded_modules.h"
 
@@ -152,8 +153,15 @@ static int do_module_stats(int argc, char **argv)
     printf("\nModule System Statistics:\n");
     printf("  Loaded modules: %zu\n", num_modules);
     printf("  Total memory: %zu bytes (%.2f KB)\n", total_mem, total_mem / 1024.0);
-    printf("  Free heap: %lu bytes\n", esp_get_free_heap_size());
-    printf("  Min free heap: %lu bytes\n\n", esp_get_minimum_free_heap_size());
+    printf("\nHeap Memory:\n");
+    printf("  Free heap: %lu bytes (%.2f KB)\n", esp_get_free_heap_size(), esp_get_free_heap_size() / 1024.0);
+    printf("  Min free heap: %lu bytes (%.2f KB)\n", esp_get_minimum_free_heap_size(), esp_get_minimum_free_heap_size() / 1024.0);
+    printf("\nIRAM (Executable):\n");
+    printf("  Free IRAM: %zu bytes (%.2f KB)\n", heap_caps_get_free_size(MALLOC_CAP_IRAM_8BIT), heap_caps_get_free_size(MALLOC_CAP_IRAM_8BIT) / 1024.0);
+    printf("  Largest IRAM block: %zu bytes\n", heap_caps_get_largest_free_block(MALLOC_CAP_IRAM_8BIT));
+    printf("\nDRAM (Data):\n");
+    printf("  Free DRAM: %zu bytes (%.2f KB)\n", heap_caps_get_free_size(MALLOC_CAP_8BIT), heap_caps_get_free_size(MALLOC_CAP_8BIT) / 1024.0);
+    printf("  Largest DRAM block: %zu bytes\n\n", heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
 
     return 0;
 }
