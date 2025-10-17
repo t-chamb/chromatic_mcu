@@ -7,5 +7,5 @@ idf_component_register(
     REQUIRES
         images esp_driver_uart esp_driver_spi esp_driver_gpio nvs_flash fatfs
         common battery button osd menu_mgr tab settings mutex
-        console crc sd_spi app_update module_loader
+        console crc sd_spi app_update module_loader embedded_modules
 )

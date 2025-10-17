@@ -3,7 +3,9 @@
 #include "esp_console.h"
 #include "argtable3/argtable3.h"
 #include "esp_log.h"
+#include "esp_partition.h"
 #include "module_loader.h"
+#include "embedded_modules.h"
 
 static const char *TAG = "cmd_modules";
 
@@ -157,6 +159,158 @@ static int do_module_stats(int argc, char **argv)
     return 0;
 }
 
+static int do_module_write_flash(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("Usage: modwriteflash <filepath>\n");
+        printf("Write a module from SD card to flash partition\n");
+        return 1;
+    }
+
+    const char *filepath = argv[1];
+    
+    FILE *f = fopen(filepath, "rb");
+    if (f == NULL) {
+        printf("✗ Failed to open file: %s\n", filepath);
+        return 1;
+    }
+    
+    fseek(f, 0, SEEK_END);
+    size_t file_size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    
+    printf("Writing module to flash (%zu bytes)...\n", file_size);
+    
+    const esp_partition_t *partition = esp_partition_find_first(
+        ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "modules");
+    
+    if (partition == NULL) {
+        printf("✗ Modules partition not found\n");
+        fclose(f);
+        return 1;
+    }
+    
+    printf("Partition size: %lu bytes\n", partition->size);
+    
+    if (file_size > partition->size) {
+        printf("✗ Module too large for partition\n");
+        fclose(f);
+        return 1;
+    }
+    
+    uint8_t *buffer = malloc(file_size);
+    if (buffer == NULL) {
+        printf("✗ Failed to allocate buffer\n");
+        fclose(f);
+        return 1;
+    }
+    
+    if (fread(buffer, file_size, 1, f) != 1) {
+        printf("✗ Failed to read file\n");
+        free(buffer);
+        fclose(f);
+        return 1;
+    }
+    fclose(f);
+    
+    printf("Erasing flash partition...\n");
+    esp_err_t ret = esp_partition_erase_range(partition, 0, partition->size);
+    if (ret != ESP_OK) {
+        printf("✗ Failed to erase partition: %s\n", esp_err_to_name(ret));
+        free(buffer);
+        return 1;
+    }
+    
+    printf("Writing to flash...\n");
+    ret = esp_partition_write(partition, 0, buffer, file_size);
+    if (ret != ESP_OK) {
+        printf("✗ Failed to write to flash: %s\n", esp_err_to_name(ret));
+        free(buffer);
+        return 1;
+    }
+    
+    free(buffer);
+    
+    printf("✓ Module written to flash successfully\n");
+    printf("  Size: %zu bytes\n", file_size);
+    printf("  Use 'modloadflash' to load it\n");
+    
+    return 0;
+}
+
+static int do_module_load_flash(int argc, char **argv)
+{
+    printf("Loading module from flash partition...\n");
+    
+    module_handle_t handle;
+    esp_err_t ret = module_load_from_flash(0, &handle);
+    if (ret != ESP_OK) {
+        printf("✗ Failed to load module: %s\n", esp_err_to_name(ret));
+        return 1;
+    }
+    
+    module_info_t info;
+    module_get_info(handle, &info);
+    
+    printf("✓ Module loaded successfully\n");
+    printf("  Name: %s\n", info.name);
+    printf("  Version: %lu\n", info.version);
+    printf("  Memory: %zu bytes\n", info.memory_used);
+    printf("  Description: %s\n", info.description);
+    
+    return 0;
+}
+
+static int do_module_load_embedded(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("Usage: modloadem <name>\n");
+        printf("Available embedded modules:\n");
+        for (size_t i = 0; i < g_num_embedded_modules; i++) {
+            printf("  %s\n", g_embedded_modules[i].name);
+        }
+        return 1;
+    }
+
+    const char *name = argv[1];
+    
+    const embedded_module_t *found = NULL;
+    size_t found_index = 0;
+    for (size_t i = 0; i < g_num_embedded_modules; i++) {
+        if (strcmp(g_embedded_modules[i].name, name) == 0) {
+            found = &g_embedded_modules[i];
+            found_index = i;
+            break;
+        }
+    }
+    
+    if (found == NULL) {
+        printf("Embedded module '%s' not found\n", name);
+        return 1;
+    }
+    
+    size_t size = embedded_module_get_size(found_index);
+    printf("Loading embedded module '%s' (%zu bytes)\n", name, size);
+    
+    module_handle_t handle;
+    esp_err_t ret = module_load_from_memory(found->data, size, &handle);
+    if (ret != ESP_OK) {
+        printf("✗ Failed to load module: %s\n", esp_err_to_name(ret));
+        return 1;
+    }
+    
+    module_info_t info;
+    module_get_info(handle, &info);
+    
+    printf("✓ Module loaded successfully\n");
+    printf("  Name: %s\n", info.name);
+    printf("  Version: %lu\n", info.version);
+    printf("  Memory: %zu bytes\n", info.memory_used);
+    printf("  Description: %s\n", info.description);
+    
+    return 0;
+}
+
 void register_module_commands(void)
 {
     const esp_console_cmd_t list_cmd = {
@@ -198,6 +352,30 @@ void register_module_commands(void)
         .func = &do_module_stats,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&stats_cmd));
+
+    const esp_console_cmd_t write_flash_cmd = {
+        .command = "modwriteflash",
+        .help = "Write a module from SD card to flash partition",
+        .hint = NULL,
+        .func = &do_module_write_flash,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&write_flash_cmd));
+
+    const esp_console_cmd_t load_flash_cmd = {
+        .command = "modloadflash",
+        .help = "Load a module from flash partition",
+        .hint = NULL,
+        .func = &do_module_load_flash,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&load_flash_cmd));
+
+    const esp_console_cmd_t load_embedded_cmd = {
+        .command = "modloadem",
+        .help = "Load an embedded module",
+        .hint = NULL,
+        .func = &do_module_load_embedded,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&load_embedded_cmd));
 
     ESP_LOGI(TAG, "Module commands registered");
 }

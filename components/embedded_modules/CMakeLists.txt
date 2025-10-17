@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.22)
+
+idf_component_register(
+    SRCS "embedded_modules.c"
+    INCLUDE_DIRS "."
+    EMBED_FILES "../../examples/hello.mod"
+)

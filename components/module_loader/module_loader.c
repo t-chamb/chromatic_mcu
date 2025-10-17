@@ -428,6 +428,85 @@ esp_err_t module_register_core_function(const char *name, void *func)
     return ESP_OK;
 }
 
+esp_err_t module_load_from_memory(const uint8_t *data, size_t size, module_handle_t *handle)
+{
+    if (!g_loader.initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (data == NULL || handle == NULL || size < sizeof(module_header_t)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    int slot = find_free_slot();
+    if (slot < 0) {
+        ESP_LOGE(TAG, "No free module slots");
+        return ESP_ERR_NO_MEM;
+    }
+
+    module_t *mod = &g_loader.modules[slot];
+
+    // Copy header from memory
+    memcpy(&mod->header, data, sizeof(module_header_t));
+
+    // Validate header
+    esp_err_t ret = validate_module_header(&mod->header);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    // Allocate and copy code
+    mod->code_mem = heap_caps_malloc(mod->header.code_size, MALLOC_CAP_EXEC);
+    if (mod->code_mem == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate code memory");
+        return ESP_ERR_NO_MEM;
+    }
+
+    memcpy(mod->code_mem, data + sizeof(module_header_t), mod->header.code_size);
+
+    // Allocate and copy data if needed
+    if (mod->header.data_size > 0) {
+        mod->data_mem = malloc(mod->header.data_size + mod->header.bss_size);
+        if (mod->data_mem == NULL) {
+            ESP_LOGE(TAG, "Failed to allocate data memory");
+            free(mod->code_mem);
+            return ESP_ERR_NO_MEM;
+        }
+
+        memcpy(mod->data_mem, data + sizeof(module_header_t) + mod->header.code_size, 
+               mod->header.data_size);
+
+        // Zero BSS
+        if (mod->header.bss_size > 0) {
+            memset((uint8_t*)mod->data_mem + mod->header.data_size, 0, mod->header.bss_size);
+        }
+    }
+
+    // Set function pointers
+    mod->init_fn = (module_init_fn_t)((uint8_t*)mod->code_mem + mod->header.entry_offset);
+    mod->exit_fn = (module_exit_fn_t)((uint8_t*)mod->code_mem + mod->header.exit_offset);
+
+    mod->in_use = true;
+    g_loader.total_memory_allocated += mod->header.code_size + mod->header.data_size + mod->header.bss_size;
+
+    ESP_LOGI(TAG, "Module '%s' loaded from memory", mod->header.name);
+
+    // Call init
+    if (mod->init_fn != NULL) {
+        ret = mod->init_fn();
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Module init failed");
+            free(mod->code_mem);
+            if (mod->data_mem) free(mod->data_mem);
+            mod->in_use = false;
+            return ret;
+        }
+    }
+
+    *handle = (module_handle_t)(intptr_t)slot;
+    return ESP_OK;
+}
+
 esp_err_t module_get_memory_stats(size_t *total_allocated, size_t *num_modules)
 {
     if (total_allocated == NULL || num_modules == NULL) {
