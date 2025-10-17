@@ -5,6 +5,7 @@ dev_tools/
 
 # Development notes and checklists (not for PR)
 /*.md
+docs
 
 # IDE and editor files
 .vscode/
