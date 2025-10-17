@@ -4,10 +4,7 @@ sdkconfig
 dev_tools/
 
 # Development notes and checklists (not for PR)
-WIFI_FILE_SERVER_REFACTOR.md
-WIFI_FILE_SERVER_IMPROVEMENTS.md
-WIFI_FILE_SERVER_PR_CHECKLIST.md
-TEST_FLASH_MODULE.md
+/*.md
 
 # IDE and editor files
 .vscode/
