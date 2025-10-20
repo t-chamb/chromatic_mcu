@@ -11,6 +11,7 @@ ESP32 MCU <--[QSPI 40MHz]--> FPGA <--[Memory Controller]--> PSRAM (8MB)
 ## Hardware Interface
 
 ### QSPI Pins
+
 - **CS (Chip Select)**: GPIO5
 - **CLK (Clock)**: GPIO18 (40 MHz)
 - **Data Lines** (Quad SPI):
@@ -20,6 +21,7 @@ ESP32 MCU <--[QSPI 40MHz]--> FPGA <--[Memory Controller]--> PSRAM (8MB)
   - HD: GPIO21
 
 ### Operating Mode
+
 - **Speed**: 40 MHz
 - **Mode**: QSPI (Quad SPI) - 4 data lines
 - **DMA**: Enabled for efficient transfers
@@ -29,6 +31,7 @@ ESP32 MCU <--[QSPI 40MHz]--> FPGA <--[Memory Controller]--> PSRAM (8MB)
 ### Command Format
 
 Each transaction consists of:
+
 1. **Command Header** (48 bits / 6 bytes)
 2. **Data Payload** (0-1023 bytes)
 
@@ -52,15 +55,18 @@ Byte 5: [Addr2-Addr0][00000]
 ```
 
 ### Command Bit
+
 - **0**: Read operation
 - **1**: Write operation
 
 ### Length Field (10 bits)
+
 - **Range**: 0-1023 bytes
 - **Encoding**: Unsigned 10-bit integer
 - **Note**: Length of data payload to read/write
 
 ### Address Field (32 bits)
+
 - **Range**: 0x00000000 - 0x007FFFFF (8MB)
 - **Encoding**: Unsigned 32-bit integer
 - **Byte Order**: Big-endian (MSB first)
@@ -74,12 +80,12 @@ Byte 5: [Addr2-Addr0][00000]
    ┌──────────────────────────────────────┐
    │ [1][Length][Address]                 │
    └──────────────────────────────────────┘
-   
+
 2. MCU sends Data Payload (Length bytes) in QSPI mode
    ┌──────────────────────────────────────┐
    │ [Data byte 0][Data byte 1]...[Data N]│
    └──────────────────────────────────────┘
-   
+
 3. FPGA writes data to PSRAM at specified address
 ```
 
@@ -90,7 +96,7 @@ Byte 5: [Addr2-Addr0][00000]
    ┌──────────────────────────────────────┐
    │ [0][Length][Address]                 │
    └──────────────────────────────────────┘
-   
+
 2. FPGA reads data from PSRAM at specified address
 
 3. FPGA sends Data Payload (Length bytes) in QSPI mode
@@ -119,6 +125,7 @@ Total: 8 MB (0x800000 bytes)
 ### Region Details
 
 #### OSD Framebuffer (0x000000 - 0x00FFFF)
+
 - **Size**: 64 KB
 - **Purpose**: Menu/UI overlay
 - **Format**: 160×144 pixels, RGB565 (2 bytes/pixel)
@@ -126,6 +133,7 @@ Total: 8 MB (0x800000 bytes)
 - **Access**: FPGA reads for display output
 
 #### GB Framebuffer (0x010000 - 0x01FFFF)
+
 - **Size**: 64 KB
 - **Purpose**: Game Boy display
 - **Format**: 160×144 pixels, RGB565 (2 bytes/pixel)
@@ -133,12 +141,14 @@ Total: 8 MB (0x800000 bytes)
 - **Access**: FPGA reads for display output
 
 #### Module Heap (0x020000 - 0x1FFFFF)
+
 - **Size**: 1.875 MB
 - **Purpose**: Dynamic module allocations
 - **Usage**: Module code, data, buffers
 - **Access**: MCU read/write via QSPI
 
 #### Asset Storage (0x200000 - 0x7FFFFF)
+
 - **Size**: 6 MB
 - **Purpose**: Game ROMs, graphics, assets
 - **Usage**: Large static data
@@ -149,6 +159,7 @@ Total: 8 MB (0x800000 bytes)
 ### Example 1: Write 256 bytes to address 0x021000
 
 **Command Header:**
+
 ```
 Command: 1 (write)
 Length: 256 (0x100)
@@ -162,6 +173,7 @@ Bytes (hex):
 ```
 
 **Data Payload:**
+
 ```
 256 bytes of data in QSPI mode
 ```
@@ -169,6 +181,7 @@ Bytes (hex):
 ### Example 2: Read 512 bytes from address 0x200000
 
 **Command Header:**
+
 ```
 Command: 0 (read)
 Length: 512 (0x200)
@@ -182,6 +195,7 @@ Bytes (hex):
 ```
 
 **Expected Response:**
+
 ```
 512 bytes of data from PSRAM in QSPI mode
 ```
@@ -216,6 +230,7 @@ States:
 ### 3. PSRAM Controller Interface
 
 The FPGA must:
+
 - Translate QSPI commands to PSRAM read/write operations
 - Handle PSRAM timing requirements
 - Buffer data if needed for PSRAM burst operations
@@ -224,11 +239,13 @@ The FPGA must:
 ### 4. Performance Considerations
 
 **Bandwidth:**
+
 - QSPI @ 40 MHz = 160 Mbps (4 bits × 40 MHz)
 - Theoretical max: 20 MB/s
 - Practical with overhead: ~15 MB/s
 
 **Latency:**
+
 - Command header: 48 bits / 160 Mbps = 0.3 μs
 - 1KB transfer: ~50 μs
 - PSRAM access: Add PSRAM latency
@@ -236,6 +253,7 @@ The FPGA must:
 ## Testing Protocol
 
 ### Test Sequence 1: Basic Read/Write
+
 ```
 1. Write pattern (0x00-0xFF) to address 0x021000
 2. Read back 256 bytes from 0x021000
@@ -243,6 +261,7 @@ The FPGA must:
 ```
 
 ### Test Sequence 2: Burst Transfer
+
 ```
 1. Write 2KB of data to address 0x021000
 2. Read back 2KB from 0x021000
@@ -250,6 +269,7 @@ The FPGA must:
 ```
 
 ### Test Sequence 3: Address Boundaries
+
 ```
 1. Write to start of each region (0x000000, 0x010000, 0x020000, 0x200000)
 2. Write to end of each region
@@ -259,6 +279,7 @@ The FPGA must:
 ## Error Handling
 
 ### FPGA Should Handle:
+
 1. **Invalid addresses** (>= 0x800000): Ignore or return zeros
 2. **Length = 0**: No-op, return to IDLE
 3. **CS de-assertion mid-transaction**: Abort, return to IDLE
@@ -267,6 +288,7 @@ The FPGA must:
 ## Debug Signals (Optional)
 
 Recommended debug outputs from FPGA:
+
 - `debug_state[2:0]`: Current state machine state
 - `debug_cmd_valid`: Command header decoded
 - `debug_cmd_write`: Write operation flag
@@ -283,6 +305,7 @@ mcu> psram_test
 ```
 
 This will:
+
 1. Initialize QSPI interface
 2. Write 256-byte test pattern to 0x021000
 3. Read back and verify
@@ -305,6 +328,7 @@ This will:
 ## Reference Implementation
 
 See MCU side implementation:
+
 - `main/fpga_psram.c`: QSPI driver
 - `main/fpga_psram.h`: API and memory map
 - `main/cmd_psram_test.c`: Test command
@@ -312,6 +336,7 @@ See MCU side implementation:
 ## Questions?
 
 Contact the MCU team for:
+
 - Protocol clarifications
 - Timing requirements
 - Test coordination

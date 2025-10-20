@@ -71,22 +71,35 @@ esp_err_t fpga_psram_init(void)
     return ESP_OK;
 }
 
-// Build QSPI command header
-// Bit 0: Command (0=read, 1=write)
-// Bits 1-10: Length (10 bits)
-// Bits 11-42: Address (32 bits)
+// Build QSPI command header (48 bits)
+// Protocol: [Cmd:1][Length:10][Address:32][Padding:5]
+// Byte 0: [Cmd][Len9-Len3]
+// Byte 1: [Len2-Len0][Addr31-Addr27]
+// Byte 2: [Addr26-Addr19]
+// Byte 3: [Addr18-Addr11]
+// Byte 4: [Addr10-Addr3]
+// Byte 5: [Addr2-Addr0][00000]
 static void build_qspi_header(uint8_t *header, bool is_write,
                                 uint32_t address, uint16_t length)
 {
+    // Build 48-bit command: [Cmd:1][Len:10][Addr:32][Pad:5]
     uint64_t cmd = 0;
-    cmd |= (is_write ? 1ULL : 0ULL);           // Command bit
-    cmd |= ((uint64_t)(length & 0x3FF)) << 1;  // Length (10 bits)
-    cmd |= ((uint64_t)address) << 11;          // Address (32 bits)
+    cmd |= (is_write ? 1ULL : 0ULL) << 47;     // Bit 47: Command
+    cmd |= ((uint64_t)(length & 0x3FF)) << 37; // Bits 46-37: Length
+    cmd |= ((uint64_t)address) << 5;           // Bits 36-5: Address
+    // Bits 4-0: Padding (zeros)
     
-    // Pack into bytes (MSB first)
-    for (int i = 0; i < 6; i++) {
-        header[i] = (cmd >> (40 - i*8)) & 0xFF;
-    }
+    // Pack into 6 bytes (MSB first)
+    header[0] = (cmd >> 40) & 0xFF;
+    header[1] = (cmd >> 32) & 0xFF;
+    header[2] = (cmd >> 24) & 0xFF;
+    header[3] = (cmd >> 16) & 0xFF;
+    header[4] = (cmd >> 8) & 0xFF;
+    header[5] = cmd & 0xFF;
+    
+    ESP_LOGD(TAG, "Header: cmd=%d len=%d addr=0x%06lX => %02X %02X %02X %02X %02X %02X",
+             is_write, length, address,
+             header[0], header[1], header[2], header[3], header[4], header[5]);
 }
 
 // Write to PSRAM via FPGA
