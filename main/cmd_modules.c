@@ -6,6 +6,7 @@
 #include "esp_heap_caps.h"
 #include "module_loader.h"
 #include "embedded_modules.h"
+#include "fpga_psram_module.h"
 
 static const char *TAG = "cmd_modules";
 
@@ -166,6 +167,23 @@ static int do_module_stats(int argc, char **argv)
     return 0;
 }
 
+static int do_module_psram_info(int argc, char **argv)
+{
+    fpga_psram_module_init();
+    
+    size_t free_space = fpga_psram_get_free_space();
+    
+    printf("\nFPGA PSRAM Module Storage:\n");
+    printf("  Total space: %.2f MB\n", FPGA_PSRAM_MODULE_SIZE / (1024.0 * 1024.0));
+    printf("  Free space: %.2f MB\n", free_space / (1024.0 * 1024.0));
+    printf("  Used space: %.2f MB\n", 
+           (FPGA_PSRAM_MODULE_SIZE - free_space) / (1024.0 * 1024.0));
+    printf("  Address range: 0x%06X - 0x%06X\n\n", 
+           FPGA_PSRAM_MODULE_START, FPGA_PSRAM_MODULE_END);
+    
+    return 0;
+}
+
 static int do_module_load_embedded(int argc, char **argv)
 {
     if (argc < 2) {
@@ -268,6 +286,14 @@ void register_module_commands(void)
         .func = &do_module_load_embedded,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&load_embedded_cmd));
+
+    const esp_console_cmd_t psram_info_cmd = {
+        .command = "modpsraminfo",
+        .help = "Show FPGA PSRAM module info",
+        .hint = NULL,
+        .func = &do_module_psram_info,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&psram_info_cmd));
 
     ESP_LOGI(TAG, "Module commands registered");
 }
