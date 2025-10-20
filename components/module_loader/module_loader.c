@@ -355,33 +355,10 @@ esp_err_t module_load_from_memory(const uint8_t *data, size_t size, module_handl
         return ret;
     }
 
-    // For embedded modules in flash, use the code directly (flash is executable)
-    // For SD card modules, we'd need IRAM but that's limited
-    // Solution: For now, embedded modules execute from flash, SD modules are for data only
-    if (is_flash) {
-        ESP_LOGI(TAG, "Module code is in flash (executable), using direct pointer");
-        mod->code_mem = (void *)(data + sizeof(module_header_t));
-    } else {
-        // SD card modules: allocate in regular DRAM
-        // Note: Code won't be executable, but data/assets can still be loaded
-        ESP_LOGW(TAG, "Allocating code in DRAM (not executable)");
-        mod->code_mem = malloc(mod->header.code_size);
-        if (mod->code_mem == NULL) {
-            ESP_LOGE(TAG, "Failed to allocate %lu bytes for code", mod->header.code_size);
-            return ESP_ERR_NO_MEM;
-        }
-        
-        const uint8_t *code_src = data + sizeof(module_header_t);
-        uint8_t *code_dst = (uint8_t *)mod->code_mem;
-        for (size_t i = 0; i < mod->header.code_size; i++) {
-            code_dst[i] = code_src[i];
-        }
-    }
-    const uint8_t *code_src = data + sizeof(module_header_t);
-    uint8_t *code_dst = (uint8_t *)mod->code_mem;
-    for (size_t i = 0; i < mod->header.code_size; i++) {
-        code_dst[i] = code_src[i];
-    }
+    // For embedded modules, code is already in flash which is executable
+    // Just use the pointer directly - no need to copy
+    ESP_LOGI(TAG, "Using code directly from flash (executable)");
+    mod->code_mem = (void *)(data + sizeof(module_header_t));
 
     // Allocate and copy data if needed
     if (mod->header.data_size > 0) {
@@ -413,13 +390,31 @@ esp_err_t module_load_from_memory(const uint8_t *data, size_t size, module_handl
     g_loader.total_memory_allocated += mod->header.code_size + mod->header.data_size + mod->header.bss_size;
 
     ESP_LOGI(TAG, "Module '%s' loaded from memory", mod->header.name);
+    ESP_LOGI(TAG, "Code address: %p (in %s)", mod->code_mem,
+             ((uintptr_t)mod->code_mem >= 0x40000000 && (uintptr_t)mod->code_mem < 0x40400000) ? "IROM" :
+             ((uintptr_t)mod->code_mem >= 0x40080000 && (uintptr_t)mod->code_mem < 0x400C0000) ? "IRAM" :
+             ((uintptr_t)mod->code_mem >= 0x3F400000 && (uintptr_t)mod->code_mem < 0x3F800000) ? "DROM (NOT EXECUTABLE!)" :
+             "UNKNOWN");
+
+    // Check if code is in executable region
+    bool is_executable = ((uintptr_t)mod->code_mem >= 0x40000000 && (uintptr_t)mod->code_mem < 0x40400000) ||
+                        ((uintptr_t)mod->code_mem >= 0x40080000 && (uintptr_t)mod->code_mem < 0x400C0000);
+    
+    if (!is_executable) {
+        ESP_LOGE(TAG, "Module code is not in executable memory region!");
+        ESP_LOGE(TAG, "Embedded modules cannot execute on ESP32 without PSRAM");
+        ESP_LOGE(TAG, "Use SD card loading instead: modload /sdcard/modules/hello.mod");
+        if (mod->data_mem) free(mod->data_mem);
+        mod->in_use = false;
+        return ESP_ERR_NOT_SUPPORTED;
+    }
 
     // Call init
     if (mod->init_fn != NULL) {
+        ESP_LOGI(TAG, "Calling module init function...");
         ret = mod->init_fn();
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Module init failed");
-            free(mod->code_mem);
             if (mod->data_mem) free(mod->data_mem);
             mod->in_use = false;
             return ret;
