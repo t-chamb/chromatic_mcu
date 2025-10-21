@@ -35,11 +35,14 @@ esp_err_t fpga_psram_init(void)
     };
 
     spi_device_interface_config_t dev_cfg = {
-        .clock_speed_hz = 40 * 1000 * 1000, // 40 MHz
+        .clock_speed_hz = 40 * 1000 * 1000,  // 40 MHz
         .mode = 0,
         .spics_io_num = QSPI_CS,
         .queue_size = 3,
-        .flags = SPI_DEVICE_HALFDUPLEX
+        .flags = SPI_DEVICE_HALFDUPLEX,
+        .command_bits = 11,   // [Cmd:1][Length:10]
+        .address_bits = 32,   // 32-bit address
+        .dummy_bits = 0       // NO dummy bits (LVGL has 3 but causes corruption)
     };
 
     esp_err_t ret = spi_bus_initialize(SPI2_HOST, &bus_cfg, SPI_DMA_CH_AUTO);
@@ -71,25 +74,8 @@ esp_err_t fpga_psram_init(void)
     return ESP_OK;
 }
 
-// Build QSPI command header
-// Bit 0: Command (0=read, 1=write)
-// Bits 1-10: Length (10 bits)
-// Bits 11-42: Address (32 bits)
-static void build_qspi_header(uint8_t *header, bool is_write,
-                                uint32_t address, uint16_t length)
-{
-    uint64_t cmd = 0;
-    cmd |= (is_write ? 1ULL : 0ULL);           // Command bit
-    cmd |= ((uint64_t)(length & 0x3FF)) << 1;  // Length (10 bits)
-    cmd |= ((uint64_t)address) << 11;          // Address (32 bits)
-    
-    // Pack into bytes (MSB first)
-    for (int i = 0; i < 6; i++) {
-        header[i] = (cmd >> (40 - i*8)) & 0xFF;
-    }
-}
-
 // Write to PSRAM via FPGA
+// Uses EXACT same format as LVGL send_lines()
 esp_err_t fpga_psram_write(uint32_t address, const uint8_t *data, size_t length)
 {
     if (spi_handle == NULL) {
@@ -97,38 +83,26 @@ esp_err_t fpga_psram_write(uint32_t address, const uint8_t *data, size_t length)
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (length > 1023) {
-        ESP_LOGE(TAG, "Length too large: %zu (max 1023)", length);
+    if (length > 1024) {
+        ESP_LOGE(TAG, "Length too large: %zu (max 1024)", length);
         return ESP_ERR_INVALID_SIZE;
     }
 
-    // Build command header (6 bytes = 48 bits for cmd+len+addr)
-    uint8_t header[6];
-    build_qspi_header(header, true, address, length);
-
-    // Prepare transaction
+    // EXACT same format as LVGL: 0x400 | 1023
+    // This is [Cmd:1][Length:10] where Cmd=1 (write), Length=1023
+    uint16_t cmd = 0x400 | 1023;
+    
     spi_transaction_t trans = {
         .flags = SPI_TRANS_MODE_QIO,
-        .length = 48,  // Header bits
-        .tx_buffer = header
+        .cmd = cmd,
+        .addr = address,
+        .length = length * 8,
+        .tx_buffer = data
     };
 
-    // Send header
     esp_err_t ret = spi_device_transmit(spi_handle, &trans);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Header transmit failed: %s", esp_err_to_name(ret));
-        return ret;
-    }
-
-    // Send data in QSPI mode
-    memset(&trans, 0, sizeof(trans));
-    trans.flags = SPI_TRANS_MODE_QIO;
-    trans.length = length * 8;
-    trans.tx_buffer = data;
-
-    ret = spi_device_transmit(spi_handle, &trans);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Data transmit failed: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Write failed: %s", esp_err_to_name(ret));
         return ret;
     }
 
@@ -143,38 +117,26 @@ esp_err_t fpga_psram_read(uint32_t address, uint8_t *data, size_t length)
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (length > 1023) {
-        ESP_LOGE(TAG, "Length too large: %zu (max 1023)", length);
+    if (length > 1024) {
+        ESP_LOGE(TAG, "Length too large: %zu (max 1024)", length);
         return ESP_ERR_INVALID_SIZE;
     }
 
-    // Build command header
-    uint8_t header[6];
-    build_qspi_header(header, false, address, length);
-
-    // Send header
+    // Read command: Cmd=0 (read), Length=1023
+    uint16_t cmd = 1023;  // No write bit
+    
     spi_transaction_t trans = {
         .flags = SPI_TRANS_MODE_QIO,
-        .length = 48,
-        .tx_buffer = header
+        .cmd = cmd,
+        .addr = address,
+        .length = 0,
+        .rxlength = length * 8,
+        .rx_buffer = data
     };
 
     esp_err_t ret = spi_device_transmit(spi_handle, &trans);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Header transmit failed: %s", esp_err_to_name(ret));
-        return ret;
-    }
-
-    // Receive data in QSPI mode
-    memset(&trans, 0, sizeof(trans));
-    trans.flags = SPI_TRANS_MODE_QIO;
-    trans.length = length * 8;
-    trans.rxlength = length * 8;
-    trans.rx_buffer = data;
-
-    ret = spi_device_transmit(spi_handle, &trans);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Data receive failed: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Read failed: %s", esp_err_to_name(ret));
         return ret;
     }
 
@@ -187,7 +149,7 @@ esp_err_t fpga_psram_write_burst(uint32_t address, const uint8_t *data, size_t t
     size_t offset = 0;
     
     while (offset < total_length) {
-        size_t chunk = (total_length - offset > 1023) ? 1023 : (total_length - offset);
+        size_t chunk = (total_length - offset > 1024) ? 1024 : (total_length - offset);
         
         esp_err_t ret = fpga_psram_write(address + offset, &data[offset], chunk);
         if (ret != ESP_OK) {
@@ -206,7 +168,7 @@ esp_err_t fpga_psram_read_burst(uint32_t address, uint8_t *data, size_t total_le
     size_t offset = 0;
     
     while (offset < total_length) {
-        size_t chunk = (total_length - offset > 1023) ? 1023 : (total_length - offset);
+        size_t chunk = (total_length - offset > 1024) ? 1024 : (total_length - offset);
         
         esp_err_t ret = fpga_psram_read(address + offset, &data[offset], chunk);
         if (ret != ESP_OK) {
