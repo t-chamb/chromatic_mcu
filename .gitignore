@@ -1,3 +1,55 @@
+# ESP-IDF Build Artifacts
 managed_components/
 build/
 sdkconfig
+sdkconfig.old
+dependencies.lock
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.cproject
+.settings/
+
+# Backup files
+*.bak
+*.backup
+*.tmp
+*~
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Node.js (for web components)
+node_modules/
+npm-debug.log*
+package-lock.json
+
+# Logs
+*.log
+
+# Compiled objects
+*.o
+*.a
+*.so
+*.elf
+
+# Flash download config
+flash_project_args
+
+# ESP-IDF generated files
+dependencies.lock
