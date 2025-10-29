@@ -344,6 +344,11 @@ void app_main(void)
 
     ESP_ERROR_CHECK(esp_console_new_repl_uart(&ReplHWConfig, &ReplConfig, &pRepl));
     esp_console_register_help_command();
+
+    // Register PSRAM test command
+    extern void register_psram_256_test(void);
+    register_psram_256_test();
+
     // All commands must be registered prior to starting the REPL
     ESP_ERROR_CHECK(esp_console_start_repl(pRepl));
 
