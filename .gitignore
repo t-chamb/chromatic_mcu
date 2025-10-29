@@ -1,7 +1,8 @@
 managed_components/
 build/
 sdkconfig
-dev_tools/
+sdkconfig.old
+dependencies.lock
 
 # Development notes and checklists (not for PR)
 WIFI_FILE_SERVER_REFACTOR.md

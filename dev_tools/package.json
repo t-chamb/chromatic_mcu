@@ -1,0 +1,11 @@
+{
+  "name": "chromatic-dev-tools",
+  "version": "1.0.0",
+  "description": "Development tools for Chromatic project",
+  "scripts": {
+    "dev": "node chromatic-api-server.js",
+    "web": "node chromatic-api-server.js",
+    "setup-lvgl": "./setup_lvgl_simulator.sh",
+    "lvgl": "./run_lvgl_simulator.sh"
+  }
+}
