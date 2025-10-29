@@ -6,6 +6,7 @@
 #include "esp_console.h"
 #include "esp_err.h"
 #include "esp_log.h"
+#include "esp_pm.h"
 #include "esp_timer.h"
 #include "esp_vfs.h"
 #include "esp_vfs_fat.h"
@@ -64,6 +65,7 @@ static spi_device_handle_t spi;
 static lv_disp_draw_buf_t disp_buf; // contains internal graphic buffer(s) called draw buffer(s)
 static lv_disp_drv_t disp_drv;      // contains callback functions
 static lv_disp_t *disp;
+static volatile bool lvgl_paused = false;
 
 // Having some issue with floating point here so scale 9.6 10x
 #define ROWS_PER_XFER_X10 32
@@ -102,9 +104,28 @@ static void lvglTimerTask(void* param)
     while(1)
     {
         // The task running lv_timer_handler should have lower priority than that running `lv_tick_inc`
-        lv_timer_handler();
+        if (!lvgl_paused) {
+            lv_timer_handler();
+        }
         vTaskDelay(pdMS_TO_TICKS(30));
     }
+}
+
+// Public functions to pause/resume LVGL updates (for diagnostic commands)
+void lvgl_pause_updates(void)
+{
+    lvgl_paused = true;
+    vTaskDelay(pdMS_TO_TICKS(100));  // Wait for any in-flight transactions to complete
+}
+
+void lvgl_resume_updates(void)
+{
+    lvgl_paused = false;
+}
+
+spi_device_handle_t get_lvgl_spi_handle(void)
+{
+    return spi;
 }
 
 static DMA_ATTR lv_color_t buffy[160*144];
@@ -125,7 +146,7 @@ static void send_lines(spi_device_handle_t spi, int ypos, uint16_t *linedata)
         trans[x].tx_buffer = &buffy[x*PIXELSPERXFER];//finally send the line datai
         trans[x].length = BYTESPERXFER * 8;  //Data length, in bits
         trans[x].flags = SPI_TRANS_MODE_QIO; //undo SPI_TRANS_USE_TXDATA flag
-        trans[x].cmd = 0x400 | 1023;//write
+        trans[x].cmd = 1023;  // WRITE: bit 10 = 0, length = 1024-1 = 1023
         trans[x].addr = x*BYTESPERXFER;
     }
 
@@ -345,13 +366,16 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_console_new_repl_uart(&ReplHWConfig, &ReplConfig, &pRepl));
     esp_console_register_help_command();
 
-    // Register PSRAM test command
+    // Register PSRAM test commands
     extern void register_psram_256_test(void);
+    extern void register_psram_diag(void);
     register_psram_256_test();
+    register_psram_diag();
 
     // All commands must be registered prior to starting the REPL
     ESP_ERROR_CHECK(esp_console_start_repl(pRepl));
 
-    vTaskDelay( pdMS_TO_TICKS(2000) );
-    xTaskCreate(PwrMgr_Task, "pwr_mgr_task", kSleepTask_StackDepth, NULL, kSleepTask_Priority, NULL);
+    // DISABLED: Power manager causes sleep during PSRAM debugging
+    // vTaskDelay( pdMS_TO_TICKS(2000) );
+    // xTaskCreate(PwrMgr_Task, "pwr_mgr_task", kSleepTask_StackDepth, NULL, kSleepTask_Priority, NULL);
 }

@@ -3,7 +3,6 @@
 #include "driver/spi_master.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
-#include "esp_cache.h"
 #include <string.h>
 
 static const char *TAG = "fpga_psram";
@@ -34,7 +33,7 @@ esp_err_t fpga_psram_init(void)
         .queue_size = 3,                      // Small queue for our transactions
         .flags = SPI_DEVICE_HALFDUPLEX,       // Half-duplex for separate TX/RX
         .cs_ena_pretrans = 3,                 // CS setup time (match LVGL)
-        .cs_ena_posttrans = 3,                // CS hold time (match LVGL)
+        .cs_ena_posttrans = 255,              // CS hold time - max value
         .command_bits = 11,                   // 11-bit command
         .address_bits = 32,                   // 32-bit address
         .dummy_bits = 3,                      // 3 dummy bits
@@ -180,6 +179,11 @@ esp_err_t fpga_psram_read(uint32_t address, uint8_t *data, size_t length)
 
     // Copy requested bytes to caller's buffer
     memcpy(data, read_dma_buf, length);
+
+    // WORKAROUND: FPGA FIFO does not clear when CS goes HIGH
+    // Add delay to allow FPGA time to flush FIFO before next operation
+    // TODO: Fix FPGA to auto-clear FIFO on CS rising edge
+    vTaskDelay(pdMS_TO_TICKS(10));
 
     ESP_LOGD(TAG, "Read completed successfully");
     return ESP_OK;
