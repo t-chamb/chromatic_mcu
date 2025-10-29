@@ -1,3 +1,48 @@
+## Unreleased - SD Card & WiFi File Server Feature
+
+### Added (In Development - Experimental Features)
+
+#### SD Card Support
+- SPI SD card driver with FAT32 filesystem support
+- Auto-mount SD card during boot at `/sdcard`
+- Custom pin mapping to avoid FPGA/flash conflicts
+  - CS: GPIO4, MOSI: GPIO15, MISO: GPIO2, CLK: GPIO14, Power: GPIO32
+- Console commands: `sd_spi_init`, `sd_spi_test`, `sd_spi_info`, `sd_spi_unmount`
+- Power cycling and retry logic for reliable initialization
+- DMA-enabled SPI communication for performance
+- Comprehensive diagnostic tools
+
+#### WiFi File Server
+- WiFi Access Point (SSID: `Chromatic_MCU`, Password: `chromatic123`)
+- Web-based file manager at http://192.168.4.1/
+- Upload/download/delete files from SD card
+- Browse directories with pagination
+- Modern responsive web UI
+- JSON REST API for programmatic access
+- OSD integration - enable/disable from System menu
+- Persistent settings for WiFi server state
+
+#### Filesystem Commands
+- `ls [path]` - List files and directories
+- `cat <file>` - Display file contents
+- Full path navigation with tab completion
+
+### Hardware Requirements
+- 10kΩ pull-up resistor on CS pin (GPIO4) to 3.3V
+- 10kΩ pull-up resistors on SD card DAT1/DAT2 pins to 3.3V
+- Optional: Power control circuit on GPIO32 for reliable card reset
+
+### Documentation
+- See `components/wifi_file_server/README.md` for WiFi server API and usage
+- See commit messages for SD card technical details and pin configuration
+
+### Status
+- ✅ SD card functionality working and tested
+- ✅ WiFi file server working with web UI
+- ⚠️  Experimental features - thorough testing recommended before production use
+
+---
+
 ## v0.13.3
 
 ### Note
