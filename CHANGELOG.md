@@ -1,3 +1,27 @@
+## Unreleased - PSRAM Development Branch
+
+### Added (In Development - Not Production Ready)
+- FPGA PSRAM read/write interface via QSPI
+- Separate SPI device handle for PSRAM to prevent LVGL interference
+- Console commands: `psram_256`, `psram_diag` for testing
+- FPGA debug register monitoring at 0xFF00
+- Comprehensive diagnostic tools for FPGA debugging
+
+### Changed (Development)
+- Disabled power manager task during PSRAM debugging
+- Added 10ms workaround delay for FPGA FIFO clearing
+- CS timing optimized (cs_ena_posttrans = 255)
+
+### Known Issues (Development)
+- **CRITICAL**: FPGA read data path disconnected - returns debug register value instead of PSRAM data
+- FPGA FIFO not clearing on CS rising edge (workaround in place)
+- PSRAM functionality blocked pending FPGA data path fix
+
+### Technical Details
+See `docs/PSRAM.md` for complete debugging findings and technical implementation details.
+
+---
+
 ## v0.13.4
 
 ### Note
