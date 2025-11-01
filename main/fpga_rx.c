@@ -2,6 +2,7 @@
 
 #include "battery.h"
 #include "brightness.h"
+#include "bt_audio.h"
 #include "color_correct_lcd.h"
 #include "color_correct_usb.h"
 #include "crc8_sae_j1850.h"
@@ -315,11 +316,13 @@ static void ProcessMessage(const RxMsg_t *const pMsg)
         {
             uint8_t temp = 127-(rxdata & 0x7F);
             temp = (uint8_t)(((float)temp)*1.08695652173913f);
-            const float volume = temp > 100 ? 100 : temp;
+            const uint8_t volume = temp > 100 ? 100 : temp;
             const uint8_t headphone = (rxdata >> 7) & 0x1;
             const uint8_t lcd_brightness = rxdata >> 8;
 
-            (void)volume;
+            // Set Bluetooth headset volume based on pot value
+            bt_audio_set_volume(volume);
+
             (void)headphone;
 
             // Ignore this when the OSD is active since the MCU always has the latest brightness value
