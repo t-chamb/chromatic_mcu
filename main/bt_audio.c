@@ -14,6 +14,7 @@
 #include "freertos/semphr.h"
 #include "driver/spi_master.h"
 #include "driver/gpio.h"
+#include "driver/i2s_std.h"
 #include "esp_rom_sys.h"
 #include <string.h>
 #include <math.h>
@@ -56,13 +57,20 @@ static uint8_t DMA_ATTR audio_dma_buf[512];
 // Critical for A2DP: Bluetooth stack needs ~4KB heap for buffer allocation
 // Old implementation consumed 2KB for ring buffer + 2KB for producer task stack
 
+// I2S hardware receive from FPGA
+// FPGA outputs I2S audio: BCLK (GPIO33), WS (GPIO25), DIN (GPIO26)
+// ESP32 I2S peripheral receives audio via DMA - zero CPU overhead!
+static i2s_chan_handle_t i2s_rx_handle = NULL;
+static bool use_i2s_audio = true;  // Use I2S hardware DMA instead of SPI polling
+
 // Forward declarations
 static void bt_app_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param);
 static void bt_app_a2d_cb(esp_a2d_cb_event_t event, esp_a2d_cb_param_t *param);
 static int32_t bt_app_a2d_data_cb(uint8_t *data, int32_t len);
 static esp_err_t audio_spi_init(void);
-static esp_err_t fpga_audio_enable(bool enable);
+esp_err_t fpga_audio_enable(bool enable);  // Non-static for cmd_bt_audio.c
 esp_err_t read_audio_from_fpga(uint8_t *buffer, size_t length);  // Non-static for cmd_bt_audio.c
+static esp_err_t audio_i2s_init(void);
 
 // Load/save paired device MAC from NVS
 static esp_err_t load_paired_device(void)
@@ -519,6 +527,21 @@ static void bt_app_a2d_cb(esp_a2d_cb_event_t event, esp_a2d_cb_param_t *param)
             // Enable FPGA audio output
             fpga_audio_enable(true);
 
+            // Initialize I2S hardware now that FPGA clocks are running
+            if (use_i2s_audio && i2s_rx_handle == NULL) {
+                // Longer delay to allow FPGA clocks to fully stabilize
+                // FPGA needs time to start outputting continuous I2S clocks
+                vTaskDelay(pdMS_TO_TICKS(500));
+
+                esp_err_t ret = audio_i2s_init();
+                if (ret != ESP_OK) {
+                    ESP_LOGW(TAG, "Failed to init I2S hardware, falling back to SPI polling mode");
+                    use_i2s_audio = false;  // Fall back to SPI polling mode
+                } else {
+                    ESP_LOGI(TAG, "Using I2S hardware DMA mode");
+                }
+            }
+
             // Check if source is ready before starting media
             ESP_LOGI(TAG, "Checking if media source is ready...");
             esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_CHECK_SRC_RDY);
@@ -526,7 +549,15 @@ static void bt_app_a2d_cb(esp_a2d_cb_event_t event, esp_a2d_cb_param_t *param)
         } else if (param->conn_stat.state == ESP_A2D_CONNECTION_STATE_DISCONNECTED) {
             ESP_LOGI(TAG, "A2DP disconnected");
             bt_connected = false;
-            
+
+            // Clean up I2S hardware
+            if (i2s_rx_handle != NULL) {
+                i2s_channel_disable(i2s_rx_handle);
+                i2s_del_channel(i2s_rx_handle);
+                i2s_rx_handle = NULL;
+                ESP_LOGI(TAG, "I2S hardware disabled");
+            }
+
             // Disable FPGA audio output
             fpga_audio_enable(false);
             
@@ -607,6 +638,7 @@ static int32_t bt_app_a2d_data_cb(uint8_t *data, int32_t len)
         ESP_LOGI(TAG, "!!! A2DP DATA CALLBACK INVOKED !!! (data=%p, len=%ld)",
                  data, (long)len);
         ESP_LOGI(TAG, "Free heap in callback: %ld bytes", (long)esp_get_free_heap_size());
+        ESP_LOGI(TAG, "Using %s mode", use_i2s_audio ? "I2S hardware DMA" : "SPI polling");
     }
 
     if (data == NULL || len <= 0) {
@@ -616,45 +648,94 @@ static int32_t bt_app_a2d_data_cb(uint8_t *data, int32_t len)
         return 0;
     }
 
-    // Read audio data from FPGA in smaller chunks to reduce FIFO underrun risk
-    // Instead of reading all 512 bytes at once, read in 128-byte chunks
-    // This gives the FPGA FIFO time to refill between reads
-    const size_t chunk_size = 128;
-    size_t total_read = 0;
+    if (use_i2s_audio) {
+        // I2S HARDWARE DMA MODE:
+        // FPGA sends 32-bit I2S samples (16-bit audio in upper 16 bits + 16-bit padding)
+        // A2DP expects 16-bit samples, so we read 32-bit and extract upper 16 bits
 
-    while (total_read < len) {
-        size_t remaining = len - total_read;
-        size_t to_read = (remaining > chunk_size) ? chunk_size : remaining;
+        static uint8_t temp_buffer[1024];  // Static temp buffer for 32-bit I2S data
+        size_t i2s_read_size = len * 2;  // Read 2x size (32-bit I2S vs 16-bit A2DP)
 
-        esp_err_t ret = read_audio_from_fpga(data + total_read, to_read);
-        if (ret != ESP_OK) {
-            // On error, fill remainder with silence
-            memset(data + total_read, 0, remaining);
-            if (callback_count <= 10) {
-                ESP_LOGW(TAG, "FPGA audio read failed at offset %zu: %d", total_read, ret);
+        if (i2s_read_size > sizeof(temp_buffer)) {
+            i2s_read_size = sizeof(temp_buffer);
+        }
+
+        size_t bytes_read = 0;
+        esp_err_t ret = i2s_channel_read(i2s_rx_handle, temp_buffer, i2s_read_size, &bytes_read, pdMS_TO_TICKS(20));
+
+        // Convert 32-bit I2S samples to 16-bit A2DP samples
+        // Extract upper 16 bits from each 32-bit sample (>> 16)
+        uint32_t *src_32 = (uint32_t *)temp_buffer;
+        int16_t *dst_16 = (int16_t *)data;
+        size_t samples_32 = bytes_read / 4;     // Number of 32-bit samples read from I2S
+        size_t samples_16 = len / 2;            // Number of 16-bit samples needed for A2DP
+        size_t samples_to_copy = (samples_32 < samples_16) ? samples_32 : samples_16;
+
+        if (callback_count == 1 && samples_32 >= 4) {
+            ESP_LOGI(TAG, "First 4 I2S samples (32-bit): 0x%08lX 0x%08lX 0x%08lX 0x%08lX",
+                     (unsigned long)src_32[0], (unsigned long)src_32[1],
+                     (unsigned long)src_32[2], (unsigned long)src_32[3]);
+        }
+
+        for (size_t i = 0; i < samples_to_copy; i++) {
+            // Extract upper 16 bits from 32-bit I2S sample
+            // Memory layout (little-endian): [byte0 byte1 byte2 byte3]
+            // 32-bit value: 0xBBAAXXXX where BBAA is the audio data
+            // >> 16 extracts bytes 2-3 as a 16-bit sample
+            dst_16[i] = (int16_t)(src_32[i] >> 16);
+        }
+
+        if (callback_count == 1 && samples_to_copy >= 4) {
+            ESP_LOGI(TAG, "First 4 A2DP samples (16-bit): %d %d %d %d",
+                     dst_16[0], dst_16[1], dst_16[2], dst_16[3]);
+        }
+
+        // Fill remainder with silence
+        if (samples_to_copy < samples_16) {
+            memset(&dst_16[samples_to_copy], 0, (samples_16 - samples_to_copy) * 2);
+        }
+
+        if (callback_count == 11) {
+            ESP_LOGI(TAG, "I2S reads successful! 32-bit to 16-bit conversion (>>16)");
+        }
+
+    } else {
+        // POLLING MODE (original implementation): Read in chunks with delays
+        // This mode doesn't use interrupt timing, kept for fallback
+        const size_t chunk_size = 128;
+        size_t total_read = 0;
+
+        while (total_read < len) {
+            size_t remaining = len - total_read;
+            size_t to_read = (remaining > chunk_size) ? chunk_size : remaining;
+
+            esp_err_t ret = read_audio_from_fpga(data + total_read, to_read);
+            if (ret != ESP_OK) {
+                // On error, fill remainder with silence
+                memset(data + total_read, 0, remaining);
+                if (callback_count <= 10) {
+                    ESP_LOGW(TAG, "FPGA audio read failed at offset %zu: %d", total_read, ret);
+                }
+                break;
             }
-            break;
+
+            total_read += to_read;
+
+            // Small delay between chunks to let FIFO refill
+            if (total_read < len) {
+                esp_rom_delay_us(100);
+            }
         }
 
-        total_read += to_read;
-
-        // Small delay between chunks to let FIFO refill (only if more chunks needed)
-        if (total_read < len) {
-            // Delay ~100us between chunks (at 44.1kHz, 128 bytes = ~1.45ms of audio)
-            esp_rom_delay_us(100);
-        }
+        // Yield to other tasks briefly
+        vTaskDelay(pdMS_TO_TICKS(1));
     }
-
-    // Yield to other tasks briefly after completing read
-    // This gives menu/OSD operations time to access SPI bus
-    // With 2048-sample FIFO (~46ms buffer), we can afford 1ms yield every 3ms callback
-    vTaskDelay(pdMS_TO_TICKS(1));
 
     return len;
 }
 
 // Enable audio output on FPGA
-static esp_err_t fpga_audio_enable(bool enable)
+esp_err_t fpga_audio_enable(bool enable)
 {
     // Auto-initialize if needed
     if (audio_spi_handle == NULL) {
@@ -713,6 +794,77 @@ static esp_err_t audio_spi_init(void)
     }
 
     ESP_LOGI(TAG, "Audio SPI device initialized");
+    return ESP_OK;
+}
+
+// Initialize I2S receive from FPGA
+// FPGA outputs I2S: BCLK (GPIO33), WS (GPIO25), DIN (GPIO26)
+static esp_err_t audio_i2s_init(void)
+{
+    // Create I2S receive channel in MASTER mode (ESP32 generates clocks)
+    i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
+    chan_cfg.auto_clear = true;
+    chan_cfg.dma_desc_num = 8;   // More DMA buffers for smoother audio
+    chan_cfg.dma_frame_num = 480; // DMA frames (must be ≤511, 480 is good for 32-bit stereo)
+
+    esp_err_t ret = i2s_new_channel(&chan_cfg, NULL, &i2s_rx_handle);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to create I2S RX channel: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    // Configure I2S standard mode for receiving in MASTER mode
+    // ESP32 generates BCLK and WS, FPGA sends data synchronized to these clocks
+    // FPGA sends 32 bits per channel, we receive full 32-bit and convert manually
+    i2s_std_slot_config_t slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_STEREO);
+    slot_cfg.slot_bit_width = I2S_SLOT_BIT_WIDTH_32BIT;  // 32-bit slots
+    slot_cfg.data_bit_width = I2S_DATA_BIT_WIDTH_32BIT;  // Receive full 32 bits
+    slot_cfg.slot_mode = I2S_SLOT_MODE_STEREO;
+    slot_cfg.slot_mask = I2S_STD_SLOT_BOTH;
+    slot_cfg.ws_width = 32;  // WS pulse width matches slot width
+    slot_cfg.ws_pol = false;  // Standard WS polarity
+    slot_cfg.bit_shift = true;  // Standard I2S bit shift
+
+    i2s_std_config_t std_cfg = {
+        .clk_cfg = {
+            .sample_rate_hz = 44100,  // ESP32 generates 44.1 kHz sample rate
+            .clk_src = I2S_CLK_SRC_DEFAULT,
+            .mclk_multiple = I2S_MCLK_MULTIPLE_256,
+        },
+        .slot_cfg = slot_cfg,
+        .gpio_cfg = {
+            .mclk = I2S_GPIO_UNUSED,
+            .bclk = PIN_NUM_I2S_BCLK,   // GPIO33 - bit clock OUTPUT to FPGA
+            .ws   = PIN_NUM_I2S_WS,     // GPIO25 - word select OUTPUT to FPGA
+            .dout = I2S_GPIO_UNUSED,    // Not transmitting
+            .din  = PIN_NUM_I2S_DIN,    // GPIO26 - data INPUT from FPGA
+            .invert_flags = {
+                .mclk_inv = false,
+                .bclk_inv = false,
+                .ws_inv = false,
+            },
+        },
+    };
+
+    ret = i2s_channel_init_std_mode(i2s_rx_handle, &std_cfg);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to init I2S standard mode: %s", esp_err_to_name(ret));
+        i2s_del_channel(i2s_rx_handle);
+        i2s_rx_handle = NULL;
+        return ret;
+    }
+
+    // Enable the RX channel
+    ret = i2s_channel_enable(i2s_rx_handle);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to enable I2S RX channel: %s", esp_err_to_name(ret));
+        i2s_del_channel(i2s_rx_handle);
+        i2s_rx_handle = NULL;
+        return ret;
+    }
+
+    ESP_LOGI(TAG, "I2S RX initialized: BCLK=GPIO%d, WS=GPIO%d, DIN=GPIO%d (MASTER mode, ESP32 generates clocks)",
+             PIN_NUM_I2S_BCLK, PIN_NUM_I2S_WS, PIN_NUM_I2S_DIN);
     return ESP_OK;
 }
 
@@ -783,6 +935,8 @@ esp_err_t bt_audio_init(void)
 
     ESP_LOGI(TAG, "Initializing Bluetooth audio...");
 
+    esp_err_t ret;
+
     // Create mutex for SPI access
     audio_mutex = xSemaphoreCreateMutex();
     if (audio_mutex == NULL) {
@@ -790,10 +944,13 @@ esp_err_t bt_audio_init(void)
         return ESP_ERR_NO_MEM;
     }
 
+    // I2S initialization moved to A2DP connection handler
+    // (Must happen AFTER fpga_audio_enable() so FPGA clocks are running)
+
     // Ring buffer initialization removed - no longer needed!
 
     // Initialize NVS (required for BT)
-    esp_err_t ret = nvs_flash_init();
+    ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
         ret = nvs_flash_init();
@@ -1150,28 +1307,8 @@ void bt_audio_set_filter(bool audio_only)
 // Set Bluetooth audio volume via AVRC absolute volume command
 esp_err_t bt_audio_set_volume(uint8_t volume_percent)
 {
-    // Only send volume commands when Bluetooth is connected
-    if (!bt_connected) {
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    // Validate input range
-    if (volume_percent > 100) {
-        volume_percent = 100;
-    }
-
-    // Convert 0-100% to 0-127 AVRC range
-    uint8_t avrc_volume = (volume_percent * 127) / 100;
-
-    // Send AVRC set absolute volume command
-    // Transaction label (tl) can be 0-15, we'll use 0
-    esp_err_t ret = esp_avrc_ct_send_set_absolute_volume_cmd(0, avrc_volume);
-
-    if (ret == ESP_OK) {
-        ESP_LOGD(TAG, "Set BT volume: %d%% (AVRC: %d/127)", volume_percent, avrc_volume);
-    } else {
-        ESP_LOGW(TAG, "Failed to set BT volume: %s", esp_err_to_name(ret));
-    }
-
-    return ret;
+    // AVRCP is disabled to save memory, so volume control is not available
+    // Just return success silently to avoid spam
+    (void)volume_percent;
+    return ESP_OK;
 }

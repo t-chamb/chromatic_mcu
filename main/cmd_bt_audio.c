@@ -4,6 +4,9 @@
 #include "argtable3/argtable3.h"
 #include "linenoise/linenoise.h"
 #include "driver/spi_master.h"
+#include "driver/i2s_std.h"
+#include "driver/gpio.h"
+#include "board.h"
 #include <string.h>
 
 static const char *TAG = "cmd_bt";
@@ -318,6 +321,269 @@ static int cmd_bt_audio_test(int argc, char **argv)
     return 0;
 }
 
+// i2s_audio_test - Test I2S audio reception from FPGA
+static int cmd_i2s_audio_test(int argc, char **argv)
+{
+    printf("Testing I2S audio reception from FPGA...\n");
+    printf("This will test if the ESP32 can receive I2S data from FPGA pins\n\n");
+
+    // Enable FPGA audio output first
+    fpga_audio_enable(true);
+    printf("FPGA audio enabled\n");
+
+    // Wait for I2S to stabilize
+    printf("Waiting 500ms for I2S to stabilize...\n");
+    vTaskDelay(pdMS_TO_TICKS(500));
+
+    // Initialize I2S in master mode (ESP32 generates clocks)
+    i2s_chan_handle_t i2s_rx = NULL;
+
+    i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
+    chan_cfg.auto_clear = true;
+    chan_cfg.dma_desc_num = 6;
+    chan_cfg.dma_frame_num = 240;
+
+    esp_err_t ret = i2s_new_channel(&chan_cfg, NULL, &i2s_rx);
+    if (ret != ESP_OK) {
+        printf("ERROR: Failed to create I2S RX channel: %s\n", esp_err_to_name(ret));
+        fpga_audio_enable(false);
+        return 1;
+    }
+
+    // Configure slot: 32-bit slots and data to match FPGA exactly
+    i2s_std_slot_config_t slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_STEREO);
+    slot_cfg.slot_bit_width = I2S_SLOT_BIT_WIDTH_32BIT;  // FPGA sends 32 bits per channel
+    slot_cfg.data_bit_width = I2S_DATA_BIT_WIDTH_32BIT;  // Try full 32-bit to match FPGA exactly
+    slot_cfg.slot_mode = I2S_SLOT_MODE_STEREO;
+    slot_cfg.slot_mask = I2S_STD_SLOT_BOTH;
+    slot_cfg.ws_width = 32;  // WS pulse width matches slot width
+    slot_cfg.ws_pol = false;  // Standard WS polarity
+    slot_cfg.bit_shift = false; // Try no bit shift - FPGA might not delay data
+
+    i2s_std_config_t std_cfg = {
+        .clk_cfg = {
+            .sample_rate_hz = 44100,  // ESP32 generates 44.1 kHz clocks in master mode
+            .clk_src = I2S_CLK_SRC_DEFAULT,
+            .mclk_multiple = I2S_MCLK_MULTIPLE_256,
+        },
+        .slot_cfg = slot_cfg,
+        .gpio_cfg = {
+            .mclk = I2S_GPIO_UNUSED,
+            .bclk = PIN_NUM_I2S_BCLK,   // GPIO33 - output to FPGA
+            .ws   = PIN_NUM_I2S_WS,     // GPIO25 - output to FPGA
+            .dout = I2S_GPIO_UNUSED,
+            .din  = PIN_NUM_I2S_DIN,    // GPIO26 - input from FPGA
+            .invert_flags = {
+                .mclk_inv = false,
+                .bclk_inv = false,
+                .ws_inv = false,
+            },
+        },
+    };
+
+    ret = i2s_channel_init_std_mode(i2s_rx, &std_cfg);
+    if (ret != ESP_OK) {
+        printf("ERROR: Failed to init I2S standard mode: %s\n", esp_err_to_name(ret));
+        i2s_del_channel(i2s_rx);
+        fpga_audio_enable(false);
+        return 1;
+    }
+
+    ret = i2s_channel_enable(i2s_rx);
+    if (ret != ESP_OK) {
+        printf("ERROR: Failed to enable I2S RX channel: %s\n", esp_err_to_name(ret));
+        i2s_del_channel(i2s_rx);
+        fpga_audio_enable(false);
+        return 1;
+    }
+
+    printf("✓ I2S initialized (MASTER mode, BCLK=GPIO33 OUT, WS=GPIO25 OUT, DIN=GPIO26 IN)\n\n");
+
+    // Allocate buffer
+    uint8_t *buffer = malloc(512);
+    if (buffer == NULL) {
+        printf("ERROR: Failed to allocate buffer\n");
+        i2s_channel_disable(i2s_rx);
+        i2s_del_channel(i2s_rx);
+        fpga_audio_enable(false);
+        return 1;
+    }
+
+    printf("Attempting I2S read (512 bytes, 100ms timeout)...\n");
+
+    size_t bytes_read = 0;
+    TickType_t start = xTaskGetTickCount();
+    ret = i2s_channel_read(i2s_rx, buffer, 512, &bytes_read, pdMS_TO_TICKS(100));
+    TickType_t elapsed = xTaskGetTickCount() - start;
+
+    printf("I2S read completed in %lu ms\n", (unsigned long)(elapsed * portTICK_PERIOD_MS));
+
+    if (ret != ESP_OK) {
+        printf("ERROR: I2S read failed: %s (error code %d)\n", esp_err_to_name(ret), ret);
+        printf("  Bytes read: %zu/512\n\n", bytes_read);
+
+        if (ret == ESP_ERR_TIMEOUT || ret == 263) {
+            printf("⚠ TIMEOUT - No I2S data received\n");
+            printf("  Possible causes:\n");
+            printf("  - FPGA not outputting I2S clocks on GPIO33 (BCLK)\n");
+            printf("  - FPGA not outputting I2S WS clock on GPIO25\n");
+            printf("  - FPGA not outputting I2S data on GPIO26 (FPGA I2S_DIN)\n");
+            printf("  - I2S clocks not continuous (ESP32 needs continuous clocks)\n");
+        }
+    } else {
+        // Count non-zero bytes
+        int non_zero = 0;
+        for (int i = 0; i < bytes_read; i++) {
+            if (buffer[i] != 0 && buffer[i] != 0xCC) non_zero++;
+        }
+
+        printf("✓ Read %zu bytes successfully\n", bytes_read);
+        printf("  Non-zero bytes: %d/%zu\n", non_zero, bytes_read);
+
+        // Show first 64 bytes
+        printf("  First 64 bytes:\n  ");
+        size_t display_bytes = bytes_read < 64 ? bytes_read : 64;
+        for (int i = 0; i < display_bytes; i++) {
+            printf("%02X ", buffer[i]);
+            if ((i + 1) % 16 == 0) printf("\n  ");
+        }
+        printf("\n");
+
+        if (non_zero > 0) {
+            printf("\n✓✓ I2S audio data is flowing from FPGA!\n");
+
+            // Parse as 32-bit stereo samples (4 bytes per channel)
+            printf("\nParsing as 32-bit stereo (8 bytes per frame):\n");
+            printf("Frame | Left Channel (32-bit)      | Right Channel (32-bit)     | L(16-bit) | R(16-bit)\n");
+            printf("------|-----------------------------|-----------------------------|-----------|----------\n");
+
+            for (int frame = 0; frame < 8 && (frame * 8 + 7) < bytes_read; frame++) {
+                uint8_t *left_bytes = &buffer[frame * 8];
+                uint8_t *right_bytes = &buffer[frame * 8 + 4];
+
+                // Reconstruct 32-bit values (little-endian)
+                uint32_t left_32 = (left_bytes[3] << 24) | (left_bytes[2] << 16) |
+                                   (left_bytes[1] << 8) | left_bytes[0];
+                uint32_t right_32 = (right_bytes[3] << 24) | (right_bytes[2] << 16) |
+                                    (right_bytes[1] << 8) | right_bytes[0];
+
+                // Extract upper 16 bits (where actual audio likely is)
+                int16_t left_16 = (int16_t)(left_32 >> 16);
+                int16_t right_16 = (int16_t)(right_32 >> 16);
+
+                printf("  %d   | %02X %02X %02X %02X (0x%08lX) | %02X %02X %02X %02X (0x%08lX) | %6d    | %6d\n",
+                       frame,
+                       left_bytes[0], left_bytes[1], left_bytes[2], left_bytes[3],
+                       (unsigned long)left_32,
+                       right_bytes[0], right_bytes[1], right_bytes[2], right_bytes[3],
+                       (unsigned long)right_32,
+                       left_16, right_16);
+            }
+        } else {
+            printf("\n⚠ I2S receiving data but all zeros\n");
+            printf("  - FPGA might be sending silence\n");
+            printf("  - Or Game Boy not making sound\n");
+        }
+    }
+
+    // Cleanup
+    i2s_channel_disable(i2s_rx);
+    i2s_del_channel(i2s_rx);
+    fpga_audio_enable(false);
+    free(buffer);
+
+    printf("\nI2S test complete, FPGA audio disabled\n");
+    return 0;
+}
+
+// gpio_monitor - Monitor GPIO pin states to verify FPGA I2S outputs
+static int cmd_gpio_monitor(int argc, char **argv)
+{
+    printf("Monitoring FPGA I2S GPIO pins for 2 seconds...\n");
+    printf("This will sample the pins to detect if FPGA is toggling them\n\n");
+
+    // Enable FPGA audio output
+    fpga_audio_enable(true);
+    printf("FPGA audio enabled\n");
+
+    // Wait for FPGA to start
+    printf("Waiting 500ms for FPGA to stabilize...\n");
+    vTaskDelay(pdMS_TO_TICKS(500));
+
+    // Configure GPIOs as inputs with pull-down
+    gpio_config_t io_conf = {
+        .pin_bit_mask = (1ULL << PIN_NUM_I2S_BCLK) | (1ULL << PIN_NUM_I2S_WS) | (1ULL << PIN_NUM_I2S_DIN),
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_ENABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    gpio_config(&io_conf);
+
+    printf("\nSampling GPIO states (1000 samples over 2 seconds):\n");
+    printf("GPIO33 (BCLK) | GPIO25 (WS) | GPIO26 (DIN)\n");
+    printf("----------------------------------------------\n");
+
+    int bclk_high = 0, bclk_low = 0;
+    int ws_high = 0, ws_low = 0;
+    int din_high = 0, din_low = 0;
+
+    for (int i = 0; i < 1000; i++) {
+        int bclk = gpio_get_level(PIN_NUM_I2S_BCLK);
+        int ws = gpio_get_level(PIN_NUM_I2S_WS);
+        int din = gpio_get_level(PIN_NUM_I2S_DIN);
+
+        if (bclk) bclk_high++; else bclk_low++;
+        if (ws) ws_high++; else ws_low++;
+        if (din) din_high++; else din_low++;
+
+        // Show first 10 samples
+        if (i < 10) {
+            printf("      %d       |      %d      |      %d\n", bclk, ws, din);
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(2));
+    }
+
+    printf("\nResults after 1000 samples:\n");
+    printf("  BCLK (GPIO33): HIGH=%d, LOW=%d", bclk_high, bclk_low);
+    if (bclk_high > 0 && bclk_low > 0) {
+        printf(" ✓ TOGGLING!\n");
+    } else if (bclk_high > 0) {
+        printf(" (stuck HIGH)\n");
+    } else {
+        printf(" (stuck LOW - no signal)\n");
+    }
+
+    printf("  WS (GPIO25):   HIGH=%d, LOW=%d", ws_high, ws_low);
+    if (ws_high > 0 && ws_low > 0) {
+        printf(" ✓ TOGGLING!\n");
+    } else if (ws_high > 0) {
+        printf(" (stuck HIGH)\n");
+    } else {
+        printf(" (stuck LOW - no signal)\n");
+    }
+
+    printf("  DIN (GPIO26):  HIGH=%d, LOW=%d", din_high, din_low);
+    if (din_high > 0 && din_low > 0) {
+        printf(" ✓ TOGGLING!\n");
+    } else if (din_high > 0) {
+        printf(" (stuck HIGH)\n");
+    } else {
+        printf(" (stuck LOW - no signal)\n");
+    }
+
+    printf("\nExpected behavior:\n");
+    printf("  - BCLK should toggle rapidly (~1.4 MHz)\n");
+    printf("  - WS should toggle slowly (~44.1 kHz)\n");
+    printf("  - DIN should have varying data\n");
+
+    // Cleanup
+    fpga_audio_enable(false);
+    printf("\nFPGA audio disabled\n");
+    return 0;
+}
+
 void register_bt_audio_commands(void)
 {
     const esp_console_cmd_t start_cmd = {
@@ -402,9 +668,25 @@ void register_bt_audio_commands(void)
 
     const esp_console_cmd_t test_cmd = {
         .command = "bt_audio_test",
-        .help = "Test FPGA audio read (512 bytes)",
+        .help = "Test FPGA audio read via SPI (512 bytes)",
         .hint = NULL,
         .func = &cmd_bt_audio_test,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&test_cmd));
+
+    const esp_console_cmd_t i2s_test_cmd = {
+        .command = "i2s_audio_test",
+        .help = "Test I2S audio reception from FPGA",
+        .hint = NULL,
+        .func = &cmd_i2s_audio_test,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&i2s_test_cmd));
+
+    const esp_console_cmd_t gpio_mon_cmd = {
+        .command = "gpio_monitor",
+        .help = "Monitor FPGA I2S GPIO pins (shows if FPGA outputs signals)",
+        .hint = NULL,
+        .func = &cmd_gpio_monitor,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&gpio_mon_cmd));
 }

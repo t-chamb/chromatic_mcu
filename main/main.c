@@ -372,6 +372,10 @@ void app_main(void)
     register_psram_256_test();
     register_psram_diag();
 
+    // Register Bluetooth audio commands
+    extern void register_bt_audio_commands(void);
+    register_bt_audio_commands();
+
     // All commands must be registered prior to starting the REPL
     ESP_ERROR_CHECK(esp_console_start_repl(pRepl));
 

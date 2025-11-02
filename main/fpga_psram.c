@@ -63,7 +63,7 @@ esp_err_t fpga_psram_init(void)
 }
 
 // Write to PSRAM via FPGA
-esp_err_t fpga_psram_write(uint32_t address, const uint8_t *data, size_t length)
+IRAM_ATTR esp_err_t fpga_psram_write(uint32_t address, const uint8_t *data, size_t length)
 {
     // Auto-initialize if not already done
     if (spi_handle == NULL) {
@@ -118,7 +118,7 @@ esp_err_t fpga_psram_write(uint32_t address, const uint8_t *data, size_t length)
 }
 
 // Read from PSRAM via FPGA
-esp_err_t fpga_psram_read(uint32_t address, uint8_t *data, size_t length)
+IRAM_ATTR esp_err_t fpga_psram_read(uint32_t address, uint8_t *data, size_t length)
 {
     // Auto-initialize if not already done
     if (spi_handle == NULL) {

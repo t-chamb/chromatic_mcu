@@ -54,3 +54,6 @@ void bt_audio_set_filter(bool audio_only);
 // Set Bluetooth audio volume (0-100%)
 // This sends an AVRC absolute volume command to the connected headset
 esp_err_t bt_audio_set_volume(uint8_t volume_percent);
+
+// Enable/disable FPGA audio output
+esp_err_t fpga_audio_enable(bool enable);
